@@ -1,0 +1,150 @@
+sequenceDiagram
+    autonumber
+    actor U as User
+    participant RCP as ReportCreatePage
+    participant SW as StepWizard
+    participant LUS as LogUploadStep
+    participant RIS as ReportInfoStep
+    participant TSS as TemplateSelectStep
+    participant SS as SubmitStep
+    participant PP as ProgressPanel
+    participant RS as reportStore
+    participant AS as authStore
+    participant RSer as reportService
+    participant TSer as templateService
+    participant DB as IndexedDB
+
+    %% ==================== 初始化 ====================
+    U->>RCP: 进入 /report/create
+    RCP->>RS: 初始化 generationState
+    RCP->>SW: 渲染向导容器（step=1）
+    SW->>LUS: 渲染步骤① 日志上传
+
+    %% ==================== 步骤①：日志上传 ====================
+    U->>LUS: 切换日志类型标签（如"数据库"）
+    LUS->>RS: setLogCategory('database')
+    U->>LUS: 拖拽/点击上传日志文件
+    LUS->>RS: addUploadedFiles(File[])
+    alt 数据库类型
+        U->>LUS: 开启"调用 AI Agent 分析"开关
+        LUS->>RS: setEnableAIAnalysis(true)
+    end
+    U->>LUS: 点击"下一步"
+    LUS->>RS: setStep(2)
+    RS-->>SW: 状态变更触发重渲染
+    SW->>RIS: 渲染步骤② 填写报告信息
+
+    %% ==================== 步骤②：填写报告信息 ====================
+    RIS->>AS: 读取 currentUser
+    AS-->>RIS: 返回 {displayName, id}
+    RIS->>RS: setReportInfo({author, authorId, date})
+    U->>RIS: 输入报告名称
+    RIS->>RS: updateReportInfoField('name', value)
+    U->>RIS: 调整报告日期
+    RIS->>RS: updateReportInfoField('date', value)
+    U->>RIS: 点击"下一步"
+    RIS->>RS: setStep(3)
+    RS-->>SW: 状态变更触发重渲染
+    SW->>TSS: 渲染步骤③ 模板选择与预览
+
+    %% ==================== 步骤③：模板选择与预览 ====================
+    TSS->>TSer: getTemplatesByCategory(category)
+    TSer->>DB: 查询 templates store
+    DB-->>TSer: 返回模板列表
+    TSer-->>TSS: 返回 ReportTemplate[]
+    U->>TSS: 点击模板卡片选中
+    TSS->>RS: setSelectedTemplateId(templateId)
+    TSS->>TSS: iframe 预览模板 HTML
+    U->>TSS: 点击"下一步"
+    TSS->>RS: setStep(4)
+    RS-->>SW: 状态变更触发重渲染
+    SW->>SS: 渲染步骤④ 提交生成
+
+    %% ==================== 步骤④：提交生成 ====================
+    SS->>RS: 读取 generationState 汇总信息
+    RS-->>SS: 返回完整状态
+    U->>SS: 点击"提交生成"
+    SS->>RS: startGeneration()
+    RS->>RSer: createReport(reportData)
+    RSer->>DB: 写入 reports store
+    DB-->>RSer: 返回 reportId
+    RSer-->>RS: 返回 Report
+    RS->>PP: 渲染进度面板（status=generating）
+
+    %% 模拟进度
+    loop 进度模拟（每 500ms）
+        RS->>RS: updateProgress(progress += random)
+        RS-->>PP: 进度更新触发重渲染
+    end
+
+    %% 生成报告 HTML
+    RS->>RSer: generateReportHTML(report, template, logs)
+    RSer->>RSer: 组装 HTML 字符串（模板 + 日志数据）
+    RSer-->>RS: 返回 HTML 字符串
+    RS->>RS: 创建 Blob URL
+    RS->>RSer: updateReportStatus('success', fileUrl)
+    RSer->>DB: 更新 reports store
+    DB-->>RSer: 确认更新
+    RS->>RS: completeGeneration(fileUrl)
+    RS-->>PP: 状态变更为 success
+    PP-->>U: 展示"下载报告"和"返回列表"按钮
+
+    alt 生成失败
+        RS->>RS: failGeneration(errorMessage)
+        RS-->>PP: 状态变更为 failed
+        PP-->>U: 展示错误原因 + "重试"按钮
+    end
+
+
+%% ==================== AI 助手交互流程 ====================
+sequenceDiagram
+    autonumber
+    actor U as User
+    participant AP as AssistantPage
+    participant HA as useAIAssistant
+    participant CS as conversationStore
+    participant CoS as conversationService
+    participant AI as aiService
+    participant CB as CodeBuddySDK
+    participant DB as IndexedDB
+
+    U->>AP: 进入 /assistant
+    AP->>CS: loadOrCreateConversation()
+    CS->>CoS: getConversationsByUser(userId)
+    CoS->>DB: 查询 conversations store
+    DB-->>CoS: 返回对话列表
+    CoS-->>CS: 返回 Conversation[]
+    CS-->>AP: 渲染对话历史
+
+    U->>AP: 输入消息并发送
+    AP->>HA: sendMessage(content)
+    HA->>CS: addLocalMessage(user, content)
+    CS-->>AP: 立即渲染用户消息
+
+    HA->>AI: detectIntent(content)
+    AI->>AI: 关键词匹配 + 规则分类
+    AI-->>HA: 返回 AIIntent
+
+    alt intent == query_report
+        HA->>CS: searchReportsByQuery(content)
+        CS->>CoS: （内部检索报告数据）
+        CS-->>HA: 返回检索结果
+        HA->>HA: 组装自然语言回复
+    else intent == analyze_data
+        HA->>AI: analyzeLogs(logContent)
+        AI->>CB: sendMessage(analysisPrompt)
+        CB-->>AI: 返回分析结果
+        AI-->>HA: 返回分析文本
+    else intent == general
+        HA->>AI: sendMessage(content, history)
+        AI->>CB: chat.send(content, {history})
+        CB-->>AI: 返回 AI 回复
+        AI-->>HA: 返回回复文本
+    end
+
+    HA->>CS: addAssistantMessage(reply, intent)
+    CS->>CoS: addMessage(conversationId, message)
+    CoS->>DB: 更新 conversations store
+    DB-->>CoS: 确认更新
+    CS-->>AP: 状态更新触发重渲染
+    AP-->>U: 展示 AI 回复
