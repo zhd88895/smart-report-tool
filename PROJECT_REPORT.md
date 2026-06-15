@@ -53,29 +53,13 @@
 
 ### 3.1 总体架构
 
-```mermaid
-flowchart TD
-    subgraph Frontend["前端 (React SPA) — localhost:5173"]
-        Vite["Vite + React + TypeScript"]
-        UI["Tailwind CSS + shadcn/ui"]
-        State["Zustand + IndexedDB"]
-    end
+| 层级 | 地址 | 技术栈 | 职责 |
+|------|------|--------|------|
+| **前端** | localhost:5173 | React + Vite + TypeScript + Tailwind CSS + shadcn/ui | UI 渲染、状态管理、文件上传 |
+| **后端** | localhost:3001 | Node.js (纯内置模块, 零依赖) + child_process.spawn | API 服务、脚本执行、SSE 实时日志推送 |
+| **Python** | venv/ | venv + pip + python-docx/pandas等 | 巡检脚本真实运行环境 |
 
-    subgraph Backend["后端 (Node.js) — localhost:3001"]
-        HTTP["HTTP Server (纯内置模块, 零依赖)"]
-        Spawn["child_process.spawn"]
-        JSON["JSON 文件存储"]
-        SSE["SSE 实时日志推送"]
-    end
-
-    subgraph Python["Python 虚拟环境"]
-        Venv["venv + pip"]
-        Script["巡检脚本运行"]
-    end
-
-    Frontend <-->|"HTTP / SSE"| Backend
-    Backend -->|"spawn"| Python
-```
+**数据流向**: 前端 ↔ HTTP/SSE ↔ 后端 → spawn → Python 虚拟环境
 
 ### 3.2 前端技术栈
 

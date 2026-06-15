@@ -2,27 +2,13 @@
 
 ## 系统架构
 
-```mermaid
-flowchart LR
-    subgraph Frontend["前端 — localhost:5173"]
-        React["React + Vite + TypeScript"]
-        Zustand["Zustand + IndexedDB"]
-    end
+| 层级 | 地址 | 技术栈 | 职责 |
+|------|------|--------|------|
+| **前端** | localhost:5173 | React + Vite + TypeScript + Tailwind CSS | UI 渲染、状态管理、文件上传 |
+| **后端** | localhost:3001 | Node.js (纯内置模块 http + child_process) | API 服务、脚本执行、SSE 日志推送 |
+| **存储** | ~/智能报告生成工具/ | 本地文件系统 | scripts/ uploads/ templates/ reports/ |
 
-    subgraph Backend["后端 — localhost:3001"]
-        HTTP["HTTP Server (纯内置模块)"]
-        Spawn["child_process.spawn"]
-    end
-
-    subgraph Storage["本地存储"]
-        ScriptsDir["scripts/ (脚本目录)"]
-        UploadsDir["uploads/ (巡检文件)"]
-        TemplatesDir["templates/ (文档模板)"]
-    end
-
-    Frontend <-->|"HTTP API"| Backend
-    Backend -->|"读写"| Storage
-```
+**数据流向**: 前端 ↔ HTTP API ↔ 后端 ↔ 本地存储
 
 ## 本地启动步骤
 
