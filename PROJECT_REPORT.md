@@ -53,23 +53,9 @@
 
 ### 3.1 总体架构
 
-<pre align="center">
-+--------------------+              +--------------------+              +--------------------+
-|    <b>前端</b>          |   HTTP/SSE   |    <b>后端</b>          |    spawn     |    <b>Python 环境</b>   |
-|  React + Vite + TS  |<------------>|  Node.js (零依赖)    |------------>|  venv + pip         |
-|  Tailwind + shadcn  |              |  child_process.spawn|              |  python-docx/pandas |
-|  Zustand + IndexedDB|              |  JSON 文件存储 + SSE |              |  巡检脚本运行        |
-|  localhost:5173     |              |  localhost:3001     |              |                     |
-+--------------------+              +----------+---------+              +--------------------+
-                                               |
-                                        +------v------+
-                                        |  <b>本地存储</b>   |
-                                        |  scripts/     |
-                                        |  uploads/     |
-                                        |  templates/   |
-                                        |  reports/     |
-                                        +--------------+
-</pre>
+<p align="center">
+  <img src="docs/architecture.png" alt="系统架构图" width="720">
+</p>
 
 ### 3.2 前端技术栈
 
