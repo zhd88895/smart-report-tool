@@ -2,19 +2,26 @@
 
 ## 系统架构
 
-```
-┌─────────────────┐      HTTP API      ┌─────────────────┐
-│   React 前端     │ ◄────────────────► │  Node.js 后端   │
-│  (Vite + TS)    │   localhost:5173   │  (Express)      │
-│                 │                    │  localhost:3001 │
-└─────────────────┘                    └────────┬────────┘
-                                                 │
-                    ┌────────────────────────────┼────────────────────────────┐
-                    │                            │                            │
-              ┌─────▼─────┐              ┌───────▼────────┐         ┌────────▼────────┐
-              │  scripts/  │              │  uploads/      │         │  templates/     │
-              │ (脚本目录)  │              │ (巡检文件)      │         │ (文档模板)      │
-              └───────────┘              └────────────────┘         └─────────────────┘
+```mermaid
+flowchart LR
+    subgraph Frontend["前端 — localhost:5173"]
+        React["React + Vite + TypeScript"]
+        Zustand["Zustand + IndexedDB"]
+    end
+
+    subgraph Backend["后端 — localhost:3001"]
+        HTTP["HTTP Server (纯内置模块)"]
+        Spawn["child_process.spawn"]
+    end
+
+    subgraph Storage["本地存储"]
+        ScriptsDir["scripts/ (脚本目录)"]
+        UploadsDir["uploads/ (巡检文件)"]
+        TemplatesDir["templates/ (文档模板)"]
+    end
+
+    Frontend <-->|"HTTP API"| Backend
+    Backend -->|"读写"| Storage
 ```
 
 ## 本地启动步骤
