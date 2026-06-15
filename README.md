@@ -2,13 +2,22 @@
 
 ## 系统架构
 
-| 层级 | 地址 | 技术栈 | 职责 |
-|------|------|--------|------|
-| **前端** | localhost:5173 | React + Vite + TypeScript + Tailwind CSS | UI 渲染、状态管理、文件上传 |
-| **后端** | localhost:3001 | Node.js (纯内置模块 http + child_process) | API 服务、脚本执行、SSE 日志推送 |
-| **存储** | ~/智能报告生成工具/ | 本地文件系统 | scripts/ uploads/ templates/ reports/ |
-
-**数据流向**: 前端 ↔ HTTP API ↔ 后端 ↔ 本地存储
+<pre align="center">
++--------------------+              +--------------------+              +--------------------+
+|    <b>前端</b>          |   HTTP/SSE   |    <b>后端</b>          |    spawn     |    <b>Python 环境</b>   |
+|  React + Vite + TS  |<------------>|  Node.js (零依赖)    |------------>|  venv + pip         |
+|  Tailwind + shadcn  |              |  child_process.spawn|              |  python-docx/pandas |
+|  localhost:5173     |              |  localhost:3001     |              |  巡检脚本执行        |
++--------------------+              +----------+---------+              +--------------------+
+                                               |
+                                        +------v------+
+                                        |  <b>本地存储</b>   |
+                                        |  scripts/     |
+                                        |  uploads/     |
+                                        |  templates/   |
+                                        |  reports/     |
+                                        +--------------+
+</pre>
 
 ## 本地启动步骤
 

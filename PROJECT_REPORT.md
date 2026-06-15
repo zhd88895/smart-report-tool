@@ -53,13 +53,23 @@
 
 ### 3.1 总体架构
 
-| 层级 | 地址 | 技术栈 | 职责 |
-|------|------|--------|------|
-| **前端** | localhost:5173 | React + Vite + TypeScript + Tailwind CSS + shadcn/ui | UI 渲染、状态管理、文件上传 |
-| **后端** | localhost:3001 | Node.js (纯内置模块, 零依赖) + child_process.spawn | API 服务、脚本执行、SSE 实时日志推送 |
-| **Python** | venv/ | venv + pip + python-docx/pandas等 | 巡检脚本真实运行环境 |
-
-**数据流向**: 前端 ↔ HTTP/SSE ↔ 后端 → spawn → Python 虚拟环境
+<pre align="center">
++--------------------+              +--------------------+              +--------------------+
+|    <b>前端</b>          |   HTTP/SSE   |    <b>后端</b>          |    spawn     |    <b>Python 环境</b>   |
+|  React + Vite + TS  |<------------>|  Node.js (零依赖)    |------------>|  venv + pip         |
+|  Tailwind + shadcn  |              |  child_process.spawn|              |  python-docx/pandas |
+|  Zustand + IndexedDB|              |  JSON 文件存储 + SSE |              |  巡检脚本运行        |
+|  localhost:5173     |              |  localhost:3001     |              |                     |
++--------------------+              +----------+---------+              +--------------------+
+                                               |
+                                        +------v------+
+                                        |  <b>本地存储</b>   |
+                                        |  scripts/     |
+                                        |  uploads/     |
+                                        |  templates/   |
+                                        |  reports/     |
+                                        +--------------+
+</pre>
 
 ### 3.2 前端技术栈
 
