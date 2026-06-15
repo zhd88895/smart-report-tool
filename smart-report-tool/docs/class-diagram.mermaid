@@ -1,0 +1,252 @@
+classDiagram
+    %% ==================== 枚举类型 ====================
+    class UserRole {
+        <<type>>
+        admin
+        user
+        readonly
+    }
+
+    class LogCategory {
+        <<type>>
+        host
+        storage
+        database
+        virtualization
+        network
+    }
+
+    class ReportStatus {
+        <<type>>
+        generating
+        success
+        failed
+    }
+
+    class AIIntent {
+        <<type>>
+        query_report
+        analyze_data
+        general
+    }
+
+    %% ==================== 实体类 ====================
+    class User {
+        +string id
+        +string username
+        +string password
+        +UserRole role
+        +string displayName
+        +string createdAt
+    }
+
+    class Script {
+        +string id
+        +string name
+        +LogCategory category
+        +string fileName
+        +number fileSize
+        +string content
+        +string uploadedAt
+        +string uploadedBy
+    }
+
+    class Report {
+        +string id
+        +string name
+        +LogCategory type
+        +string date
+        +string author
+        +string authorId
+        +string templateId
+        +ReportStatus status
+        +string[] logs
+        +string fileUrl
+        +string aiAnalysis
+        +string createdAt
+    }
+
+    class ConversationMessage {
+        +string role
+        +string content
+        +AIIntent intent
+        +string timestamp
+    }
+
+    class Conversation {
+        +string id
+        +string userId
+        +string userName
+        +ConversationMessage[] messages
+        +string createdAt
+        +string updatedAt
+    }
+
+    class ReportTemplate {
+        +string id
+        +string name
+        +LogCategory category
+        +string thumbnail
+        +string description
+        +string htmlContent
+        +boolean isBuiltIn
+    }
+
+    class ReportGenerationState {
+        +number step
+        +LogCategory logCategory
+        +File[] uploadedFiles
+        +boolean enableAIAnalysis
+        +Object reportInfo
+        +string selectedTemplateId
+        +number progress
+        +string status
+        +string errorMessage
+    }
+
+    %% ==================== 服务类 ====================
+    class AuthService {
+        +login(username, password) Promise~Object~
+        +logout() void
+        +getCurrentUser() User
+        +isAuthenticated() boolean
+        +initDefaultAdmin() Promise~void~
+    }
+
+    class UserService {
+        +getAllUsers() Promise~User[]~
+        +getUserById(id) Promise~User~
+        +createUser(user) Promise~User~
+        +deleteUser(id) Promise~void~
+        +searchUsers(query) Promise~User[]~
+    }
+
+    class ScriptService {
+        +getAllScripts() Promise~Script[]~
+        +getScriptsByCategory(category) Promise~Script[]~
+        +searchScripts(keyword, category) Promise~Script[]~
+        +createScript(script) Promise~Script~
+        +deleteScript(id) Promise~void~
+    }
+
+    class ReportService {
+        +getAllReports() Promise~Report[]~
+        +getReportsByUser(userId) Promise~Report[]~
+        +getReportsByType(type) Promise~Report[]~
+        +createReport(report) Promise~Report~
+        +updateReportStatus(id, status, fileUrl) Promise~void~
+        +deleteReport(id) Promise~void~
+        +generateReportHTML(report, template, logs) string
+    }
+
+    class ConversationService {
+        +getAllConversations() Promise~Conversation[]~
+        +getConversationsByUser(userId) Promise~Conversation[]~
+        +getConversationById(id) Promise~Conversation~
+        +addMessage(conversationId, message) Promise~void~
+        +createConversation(userId, userName) Promise~Conversation~
+        +deleteConversation(id) Promise~void~
+    }
+
+    class AIService {
+        +detectIntent(message) AIIntent
+        +sendMessage(message, history) Promise~string~
+        +analyzeLogs(logContent) Promise~string~
+    }
+
+    class DBService {
+        +initDB() Promise~IDBDatabase~
+        +getStore(storeName) Promise~Object~
+        +add(storeName, data) Promise~any~
+        +get(storeName, id) Promise~any~
+        +getAll(storeName) Promise~any[]~
+        +update(storeName, id, data) Promise~void~
+        +delete(storeName, id) Promise~void~
+        +query(storeName, index, range) Promise~any[]~
+    }
+
+    %% ==================== Store 类 ====================
+    class AuthStore {
+        +User user
+        +string token
+        +boolean isAuthenticated
+        +login(credentials) Promise~void~
+        +logout() void
+        +checkAuth() void
+    }
+
+    class ScriptStore {
+        +Script[] scripts
+        +boolean loading
+        +fetchScripts() Promise~void~
+        +addScript(script) Promise~void~
+        +removeScript(id) Promise~void~
+    }
+
+    class ReportStore {
+        +Report[] reports
+        +ReportGenerationState generationState
+        +boolean loading
+        +fetchReports() Promise~void~
+        +startGeneration() void
+        +updateProgress(progress) void
+        +completeGeneration(fileUrl) void
+        +failGeneration(error) void
+    }
+
+    class UserStore {
+        +User[] users
+        +boolean loading
+        +fetchUsers() Promise~void~
+        +addUser(user) Promise~void~
+        +removeUser(id) Promise~void~
+    }
+
+    class ConversationStore {
+        +Conversation[] conversations
+        +Conversation currentConversation
+        +boolean loading
+        +fetchConversations() Promise~void~
+        +sendMessage(content) Promise~void~
+        +createNewConversation() Promise~void~
+    }
+
+    class UIStore {
+        +boolean sidebarCollapsed
+        +string theme
+        +toggleSidebar() void
+        +setTheme(theme) void
+    }
+
+    %% ==================== 关系定义 ====================
+    User --> UserRole : uses
+    Script --> LogCategory : uses
+    Report --> LogCategory : uses
+    Report --> ReportStatus : uses
+    ConversationMessage --> AIIntent : uses
+    ReportTemplate --> LogCategory : uses
+    ReportGenerationState --> LogCategory : uses
+
+    AuthService --> User : operates on
+    UserService --> User : operates on
+    ScriptService --> Script : operates on
+    ReportService --> Report : operates on
+    ReportService --> ReportTemplate : uses
+    ConversationService --> Conversation : operates on
+    AIService --> AIIntent : returns
+
+    AuthStore --> AuthService : depends on
+    ScriptStore --> ScriptService : depends on
+    ReportStore --> ReportService : depends on
+    UserStore --> UserService : depends on
+    ConversationStore --> ConversationService : depends on
+    ConversationStore --> AIService : depends on
+
+    AuthService --> DBService : uses
+    UserService --> DBService : uses
+    ScriptService --> DBService : uses
+    ReportService --> DBService : uses
+    ConversationService --> DBService : uses
+
+    ReportStore --> ReportGenerationState : contains
+    Conversation --> ConversationMessage : contains

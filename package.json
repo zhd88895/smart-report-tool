@@ -1,0 +1,15 @@
+{
+  "name": "smart-report-system",
+  "version": "1.0.0",
+  "description": "智能报告生成工具 - 前后端完整系统",
+  "scripts": {
+    "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
+    "dev:server": "cd smart-report-server && npx tsx watch src/index.ts",
+    "dev:client": "cd smart-report-tool && npx vite --port 5173",
+    "build": "cd smart-report-tool && npx vite build",
+    "start": "npm run dev"
+  },
+  "devDependencies": {
+    "concurrently": "^9.0.0"
+  }
+}
