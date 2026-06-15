@@ -53,22 +53,28 @@
 
 ### 3.1 总体架构
 
-```
-┌─────────────────────┐        ┌─────────────────────┐
-│   前端 (React SPA)   │  HTTP  │   后端 (Node.js)     │
-│   localhost:5173     │◄──────►│   localhost:3001     │
-│                      │  SSE   │                      │
-│  Vite + React + TS   │        │  纯内置模块 (零依赖)  │
-│  Tailwind + shadcn   │        │  child_process.spawn  │
-│  Zustand + IndexedDB │        │  JSON文件存储         │
-└─────────────────────┘        └──────────┬──────────┘
-                                          │ spawn
-                                          ▼
-                               ┌─────────────────────┐
-                               │   Python 虚拟环境    │
-                               │   venv + pip        │
-                               │   巡检脚本运行       │
-                               └─────────────────────┘
+```mermaid
+flowchart TD
+    subgraph Frontend["前端 (React SPA) — localhost:5173"]
+        Vite["Vite + React + TypeScript"]
+        UI["Tailwind CSS + shadcn/ui"]
+        State["Zustand + IndexedDB"]
+    end
+
+    subgraph Backend["后端 (Node.js) — localhost:3001"]
+        HTTP["HTTP Server (纯内置模块, 零依赖)"]
+        Spawn["child_process.spawn"]
+        JSON["JSON 文件存储"]
+        SSE["SSE 实时日志推送"]
+    end
+
+    subgraph Python["Python 虚拟环境"]
+        Venv["venv + pip"]
+        Script["巡检脚本运行"]
+    end
+
+    Frontend <-->|"HTTP / SSE"| Backend
+    Backend -->|"spawn"| Python
 ```
 
 ### 3.2 前端技术栈
