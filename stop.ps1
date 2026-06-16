@@ -1,9 +1,14 @@
 # ============================================================
 #  智能报告生成工具 - 停止服务
 # ============================================================
+
+# ---- 编码修复 ----
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$OutputEncoding           = [System.Text.Encoding]::UTF8
+
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Cyan
-Write-Host "  停止所有服务..." -ForegroundColor White
+Write-Host "  Stopping all services..." -ForegroundColor White
 Write-Host "========================================" -ForegroundColor Cyan
 
 $ports = @(3001, 5173)
@@ -15,7 +20,7 @@ foreach ($port in $ports) {
         $m = [regex]::Match($l, '\s+(\d+)\s*$')
         if ($m.Success) {
             $pid = [int]$m.Groups[1].Value
-            Write-Host "  停止 PID $pid (端口 $port)" -ForegroundColor Yellow
+            Write-Host "  Stopping PID $pid (port $port)" -ForegroundColor Yellow
             Stop-Process -Id $pid -Force -ErrorAction SilentlyContinue
             $stopped++
         }
@@ -23,9 +28,9 @@ foreach ($port in $ports) {
 }
 
 if ($stopped -eq 0) {
-    Write-Host "  未发现正在运行的服务。" -ForegroundColor Gray
+    Write-Host "  No running services found." -ForegroundColor Gray
 } else {
-    Write-Host "  已停止 $stopped 个进程。" -ForegroundColor Green
+    Write-Host "  Stopped $stopped process(es)." -ForegroundColor Green
 }
 
 Write-Host "========================================" -ForegroundColor Cyan
