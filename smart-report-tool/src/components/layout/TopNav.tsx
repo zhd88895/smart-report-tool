@@ -3,6 +3,7 @@ import { LogOut, Settings } from 'lucide-react';
 import { useAuthStore } from '@/stores/authStore';
 import { useUIStore } from '@/stores/uiStore';
 import { ROUTES } from '@/constants/routes';
+import { ROLE_LABELS } from '@/constants/roles';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
   DropdownMenuSeparator, DropdownMenuTrigger,
@@ -20,14 +21,7 @@ export function TopNav() {
     navigate(ROUTES.LOGIN);
   };
 
-  const getRoleLabel = (role: string) => {
-    switch (role) {
-      case 'admin': return '管理员';
-      case 'user': return '普通用户';
-      case 'readonly': return '只读用户';
-      default: return role;
-    }
-  };
+  const roleLabel = user?.role ? (ROLE_LABELS[user.role] || user.role) : '';
 
   return (
     <header className="fixed top-0 right-0 z-40 h-16 border-b bg-card px-4 flex items-center justify-between transition-all duration-300"
@@ -51,7 +45,7 @@ export function TopNav() {
             <DropdownMenuLabel className="font-normal">
               <div className="flex flex-col space-y-1">
                 <p className="text-sm font-medium">{user?.displayName || '未登录'}</p>
-                <p className="text-xs text-muted-foreground">{getRoleLabel(user?.role || '')}</p>
+                <p className="text-xs text-muted-foreground">{roleLabel}</p>
               </div>
             </DropdownMenuLabel>
             <DropdownMenuSeparator />

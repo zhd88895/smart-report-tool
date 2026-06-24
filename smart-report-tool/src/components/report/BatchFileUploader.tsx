@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef, useEffect, type ReactNode } from 'react';
 import { Upload, X, FileText, Archive, Eye, FolderTree, ChevronDown, ChevronUp, Package, AlertCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { formatFileSize } from '@/utils/formatters';
@@ -15,10 +15,33 @@ interface BatchFileUploaderProps {
   files: InputFileEntry[];
   onFilesChange: (files: InputFileEntry[]) => void;
   acceptedTypes?: string;
+  /** 脚本巡检数据格式（如 "docx xlsx txt"），用于限制上传文件类型 */
+  inputFormats?: string;
   maxSizeMB?: number;
+  navButtons?: ReactNode;
 }
 
-const DEFAULT_ACCEPT = '.log,.txt,.csv,.json,.xlsx,.html,.md,.xml,.cfg,.conf,.ini,.yaml,.yml,.zip,.gz,.tar,.tgz';
+/** 压缩包格式，始终允许 */
+const ARCHIVE_EXTS = '.zip,.gz,.tar,.tgz';
+
+/** 解析 inputFormats 字符串为 accept 属性值 */
+function buildAccept(inputFormats?: string): string {
+  if (!inputFormats || !inputFormats.trim()) return '';
+  const parts = inputFormats.trim().split(/[,\s]+/).filter(Boolean);
+  const exts = parts.map((p) => {
+    const clean = p.replace(/^\./, '').toLowerCase();
+    return `.${clean}`;
+  });
+  return [...exts, ...ARCHIVE_EXTS.split(',')].join(',');
+}
+
+/** 从 inputFormats 解析允许的扩展名集合 */
+function parseAllowedExts(inputFormats?: string): Set<string> | null {
+  if (!inputFormats || !inputFormats.trim()) return null;
+  const parts = inputFormats.trim().split(/[,\s]+/).filter(Boolean);
+  const exts = parts.map((p) => p.replace(/^\./, '').toLowerCase());
+  return new Set(exts);
+}
 
 function generateId() {
   return `file_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -28,11 +51,68 @@ function generateGroupId() {
   return `group_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
 }
 
+// ── Web Worker for SHA-256 (inline Blob, zero main-thread impact) ──
+let _hashWorker: Worker | null = null;
+let _hashWorkerUrl: string | null = null;
+let _hashWorkerPending = 0;
+const _hashWorkerCallbacks = new Map<string, (hash: string) => void>();
+
+function getHashWorker(): Worker {
+  if (!_hashWorker) {
+    const code = `
+      self.onmessage = async (e) => {
+        const { id, buffer } = e.data;
+        try {
+          const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
+          const hash = Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
+          self.postMessage({ id, hash });
+        } catch {
+          self.postMessage({ id, hash: '' });
+        }
+      };
+    `;
+    const blob = new Blob([code], { type: 'text/javascript' });
+    _hashWorkerUrl = URL.createObjectURL(blob);
+    _hashWorker = new Worker(_hashWorkerUrl);
+    _hashWorker.onmessage = (e) => {
+      const { id, hash } = e.data;
+      const cb = _hashWorkerCallbacks.get(id);
+      if (cb) { cb(hash); _hashWorkerCallbacks.delete(id); }
+      _hashWorkerPending--;
+      // 空闲时回收 worker 资源
+      if (_hashWorkerPending <= 0 && _hashWorker) {
+        _hashWorkerPending = 0;
+        _hashWorker.terminate();
+        _hashWorker = null;
+        if (_hashWorkerUrl) { URL.revokeObjectURL(_hashWorkerUrl); _hashWorkerUrl = null; }
+      }
+    };
+  }
+  return _hashWorker;
+}
+
+function computeFileHash(file: File): Promise<string> {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const buffer = reader.result as ArrayBuffer;
+      const id = `h_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      _hashWorkerCallbacks.set(id, resolve);
+      _hashWorkerPending++;
+      getHashWorker().postMessage({ id, buffer }, [buffer]);
+    };
+    reader.onerror = () => resolve('');
+    reader.readAsArrayBuffer(file);
+  });
+}
+
 export function BatchFileUploader({
   files,
   onFilesChange,
-  acceptedTypes = DEFAULT_ACCEPT,
+  acceptedTypes: _accept,
+  inputFormats,
   maxSizeMB = 50,
+  navButtons,
 }: BatchFileUploaderProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [previewEntry, setPreviewEntry] = useState<{ entry: ArchiveEntry; parentName: string } | null>(null);
@@ -40,6 +120,9 @@ export function BatchFileUploader({
   const fileInputRef = useRef<HTMLInputElement>(null);
   // Use local state as the single source of truth to avoid stale closure issues
   const [localFiles, setLocalFiles] = useState<InputFileEntry[]>(files);
+
+  const accept = buildAccept(inputFormats);
+  const allowedExts = parseAllowedExts(inputFormats);
 
   // Sync from parent when parent clears files (reset)
   const prevFilesLenRef = useRef(files.length);
@@ -68,7 +151,7 @@ export function BatchFileUploader({
     const id = generateId();
     const isArchive = !!detectArchiveType(file.name);
 
-    // Step 1: Add entry with 'uploading' status
+    // Add entry IMMEDIATELY first, then compute hash asynchronously to avoid blocking the UI
     updateFiles((prev) => [
       ...prev,
       {
@@ -77,6 +160,7 @@ export function BatchFileUploader({
         size: file.size,
         type: file.type || 'application/octet-stream',
         file,
+        hash: '',
         isArchive,
         groupId: generateGroupId(),
         progress: 0,
@@ -84,32 +168,18 @@ export function BatchFileUploader({
       },
     ]);
 
-    // Step 2: Simulate upload progress
-    let progress = 0;
-    const progressInterval = setInterval(() => {
-      progress += Math.random() * 20 + 8;
-      if (progress >= 100) {
-        progress = 100;
-        clearInterval(progressInterval);
-      }
+    // Compute SHA-256 hash in Web Worker (zero main-thread blocking)
+    computeFileHash(file).then((fileHash) => {
       updateFiles((prev) =>
-        prev.map((f) =>
-          f.id === id && f.status === 'uploading'
-            ? { ...f, progress: Math.min(100, Math.round(progress)) }
-            : f
-        )
+        prev.map((f) => (f.id === id ? { ...f, hash: fileHash } : f))
       );
-    }, 120);
-
-    // Wait for simulated upload
-    await new Promise((r) => setTimeout(r, 700));
-    clearInterval(progressInterval);
+    }).catch(() => {});
 
     if (isArchive) {
-      // Step 3a: Update to extracting
+      // Mark as extracting and decompress
       updateFiles((prev) =>
         prev.map((f) =>
-          f.id === id ? { ...f, status: 'extracting' as const, progress: 100 } : f
+          f.id === id ? { ...f, status: 'extracting' as const } : f
         )
       );
 
@@ -121,6 +191,7 @@ export function BatchFileUploader({
               ? {
                   ...f,
                   status: 'done' as const,
+                  progress: 100,
                   extractedFiles: result.entries.map((e) => ({
                     name: e.name,
                     size: e.size,
@@ -148,7 +219,7 @@ export function BatchFileUploader({
         toast.error(`「${file.name}」解压失败`);
       }
     } else {
-      // Step 3b: Regular file - mark done
+      // Regular file — mark as done immediately
       updateFiles((prev) =>
         prev.map((f) =>
           f.id === id ? { ...f, status: 'done' as const, progress: 100 } : f
@@ -164,6 +235,15 @@ export function BatchFileUploader({
       if (f.size > maxSize) {
         toast.error(`「${f.name}」超过大小限制 (${formatFileSize(maxSize)})`);
         return false;
+      }
+      // 校验文件扩展名（压缩包始终允许）
+      if (allowedExts) {
+        const ext = f.name.split('.').pop()?.toLowerCase() || '';
+        const isArchive = ['zip', 'gz', 'tar', 'tgz'].includes(ext);
+        if (!isArchive && !allowedExts.has(ext)) {
+          toast.error(`「${f.name}」类型不支持，当前脚本仅接受: ${[...allowedExts].join(', ')}`);
+          return false;
+        }
       }
       return true;
     });
@@ -216,25 +296,28 @@ export function BatchFileUploader({
 
   return (
     <div className="space-y-4">
+      {/* Nav buttons */}
+      {navButtons}
+
       {/* Drop Zone */}
       <div
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
+        onClick={() => fileInputRef.current?.click()}
         className={cn(
           'flex flex-col items-center justify-center rounded-lg border-2 border-dashed p-8 transition-colors cursor-pointer',
           isDragging
             ? 'border-primary bg-primary/5'
             : 'border-muted-foreground/25 hover:border-muted-foreground/50'
         )}
-        onClick={() => fileInputRef.current?.click()}
       >
         <Upload className="mb-4 h-10 w-10 text-muted-foreground" />
         <p className="text-sm text-muted-foreground">
           拖拽文件到此处，或 <span className="text-primary hover:underline">点击上传</span>
         </p>
         <p className="mt-1 text-xs text-muted-foreground">
-          支持批量上传，支持 ZIP / GZ / TAR 压缩包自动解压
+          支持批量上传，支持 ZIP / GZ / TAR 压缩包拖拽上传
         </p>
         <p className="mt-0.5 text-xs text-muted-foreground">
           单个文件不超过 {formatFileSize(maxSize)}
@@ -242,8 +325,8 @@ export function BatchFileUploader({
         <input
           ref={fileInputRef}
           type="file"
-          className="hidden"
-          accept={acceptedTypes}
+          className="absolute opacity-0 w-0 h-0 overflow-hidden"
+          accept={accept || undefined}
           multiple
           onChange={handleInputChange}
         />
@@ -252,8 +335,7 @@ export function BatchFileUploader({
       {/* Stats */}
       {localFiles.length > 0 && (
         <div className="flex items-center gap-3 text-sm">
-          <Badge variant="secondary">共 {localFiles.length} 个文件</Badge>
-          <Badge variant="outline">已完成 {doneFiles.length} 个</Badge>
+          <Badge variant="secondary">已选择 {localFiles.length} 个文件，其中 {doneFiles.length} 个已上传</Badge>
           {hasErrors && <Badge variant="destructive">有错误</Badge>}
         </div>
       )}
@@ -303,7 +385,7 @@ export function BatchFileUploader({
                       <Badge variant="secondary">解压中...</Badge>
                     )}
                     {file.status === 'uploading' && (
-                      <Badge variant="secondary">上传中...</Badge>
+                      <Badge variant="secondary">处理中...</Badge>
                     )}
                     <button
                       onClick={() => removeFile(file.id)}
@@ -314,8 +396,8 @@ export function BatchFileUploader({
                   </div>
                 </div>
 
-                {/* Progress bar */}
-                {(file.status === 'uploading' || file.status === 'extracting') && (
+                {/* Progress bar — only for extracting */}
+                {file.status === 'extracting' && (
                   <div className="mt-2">
                     <Progress value={file.progress} className="h-1.5" />
                   </div>

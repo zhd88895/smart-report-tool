@@ -1,0 +1,96 @@
+classDiagram
+    class Config {
+        +PORT: number
+        +DATA_DIR: string
+        +JWT_SECRET: string
+        +JWT_EXPIRES_IN: string
+        +ALLOWED_ORIGINS: string[]
+        +getEnv(key: string): string
+    }
+    
+    class AuthMiddleware {
+        +authenticate(req, res, next): void
+        +authorize(roles: string[]): Function
+        +generateToken(user: User): string
+        +verifyToken(token: string): object
+    }
+    
+    class SecurityMiddleware {
+        +validateFileName(fileName: string): boolean
+        +validateFilePath(filePath: string, baseDir: string): boolean
+        +sanitizeInput(input: string): string
+    }
+    
+    class Database {
+        -dbPath: string
+        -writeQueue: Promise<void>
+        +read(): Promise~object~
+        +write(data: object): Promise~void~
+        +atomicUpdate(updater: Function): Promise~void~
+    }
+    
+    class Logger {
+        -logFile: string
+        -maxSize: number
+        +info(message: string): void
+        +warn(message: string): void
+        +error(message: string): void
+        +debug(message: string): void
+        -rotateIfNeeded(): Promise~void~
+    }
+    
+    class UserRouter {
+        +login(req, res): void
+        +register(req, res): void
+        +getProfile(req, res): void
+        +updateProfile(req, res): void
+    }
+    
+    class ScriptRouter {
+        +upload(req, res): void
+        +list(req, res): void
+        +delete(req, res): void
+        +execute(req, res): void
+    }
+    
+    class ReportRouter {
+        +generate(req, res): void
+        +download(req, res): void
+        +list(req, res): void
+    }
+    
+    class User {
+        +id: string
+        +username: string
+        +passwordHash: string
+        +role: string
+        +status: string
+        +createdAt: string
+        +updatedAt: string
+        +lastLoginAt: string
+        +loginAttempts: number
+        +lockUntil: string
+    }
+    
+    class TokenPayload {
+        +userId: string
+        +username: string
+        +role: string
+        +iat: number
+        +exp: number
+    }
+    
+    Config --> AuthMiddleware : uses
+    Config --> SecurityMiddleware : uses
+    AuthMiddleware --> Database : reads users
+    SecurityMiddleware --> Logger : logs violations
+    UserRouter --> AuthMiddleware : uses
+    UserRouter --> Database : reads/writes
+    ScriptRouter --> AuthMiddleware : uses
+    ScriptRouter --> SecurityMiddleware : uses
+    ScriptRouter --> Database : reads/writes
+    ReportRouter --> AuthMiddleware : uses
+    ReportRouter --> SecurityMiddleware : uses
+    ReportRouter --> Database : reads/writes
+    AuthMiddleware ..> TokenPayload : creates
+    Database ..> User : stores

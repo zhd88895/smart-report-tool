@@ -1,19 +1,31 @@
-import { format, parseISO } from 'date-fns';
+import { format, parseISO, isValid } from 'date-fns';
 import { zhCN } from 'date-fns/locale';
+
+function safeParseDate(date: string | Date | null | undefined): Date | null {
+  if (!date) return null;
+  if (date instanceof Date) return isValid(date) ? date : null;
+  if (typeof date !== 'string') return null;
+  const trimmed = date.trim();
+  if (!trimmed) return null;
+  const d = parseISO(trimmed);
+  return isValid(d) ? d : null;
+}
 
 /**
  * Format a date string or Date to a readable format.
  */
-export function formatDate(date: string | Date, pattern = 'yyyy-MM-dd HH:mm'): string {
-  const d = typeof date === 'string' ? parseISO(date) : date;
+export function formatDate(date: string | Date | null | undefined, pattern = 'yyyy-MM-dd HH:mm'): string {
+  const d = safeParseDate(date);
+  if (!d) return '-';
   return format(d, pattern, { locale: zhCN });
 }
 
 /**
  * Format a date to YYYY-MM-DD.
  */
-export function formatDateShort(date: string | Date): string {
-  const d = typeof date === 'string' ? parseISO(date) : date;
+export function formatDateShort(date: string | Date | null | undefined): string {
+  const d = safeParseDate(date);
+  if (!d) return '-';
   return format(d, 'yyyy-MM-dd', { locale: zhCN });
 }
 

@@ -1,7 +1,7 @@
 import { useNavigate, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard, FileText, ClipboardList, Download, Bot,
-  Users, MessageSquare, Settings, ChevronLeft, ChevronRight,
+  Users, Settings, ChevronLeft, ChevronRight,
 } from 'lucide-react';
 import { useAuthStore } from '@/stores/authStore';
 import { useUIStore } from '@/stores/uiStore';
@@ -16,7 +16,6 @@ const menuItems = [
   { icon: Download, label: '报告管理', path: ROUTES.REPORTS, feature: 'reports' as const },
   { icon: Bot, label: 'AI助手', path: ROUTES.ASSISTANT, feature: 'assistant' as const },
   { icon: Users, label: '用户管理', path: ROUTES.USERS, feature: 'users' as const },
-  { icon: MessageSquare, label: '对话记录', path: ROUTES.CONVERSATIONS, feature: 'conversations' as const },
   { icon: Settings, label: '个人设置', path: ROUTES.SETTINGS, feature: 'settings' as const },
 ];
 
@@ -37,7 +36,11 @@ export function Sidebar() {
     >
       <div className="flex h-16 items-center justify-between border-b px-4">
         {!sidebarCollapsed && (
-          <span className="text-lg font-bold text-primary">SRT</span>
+          <span className="font-bold text-primary" style={{ fontSize: '1.4rem', letterSpacing: '0.05em' }}>
+              <span style={{ color: '#2563eb' }}>A</span>
+              <span style={{ color: '#dc2626' }}>P</span>
+              <span style={{ color: '#16a34a' }}>L</span>
+            </span>
         )}
         <button
           onClick={toggleSidebar}

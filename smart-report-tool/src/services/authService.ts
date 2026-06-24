@@ -1,74 +1,62 @@
 import { User } from '@/types';
-import { getDB, getAllUsers, putUser } from './db';
+import { apiPost } from './api';
 
 const AUTH_TOKEN_KEY = 'smart_report_auth_token';
-const CURRENT_USER_KEY = 'smart_report_current_user';
+export const CURRENT_USER_KEY = 'smart_report_current_user';
 
-async function hashPassword(password: string): Promise<string> {
-  const encoder = new TextEncoder();
-  const data = encoder.encode(password);
-  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
+function isNetworkError(message: string): boolean {
+  return (
+    message.includes('Failed to fetch') ||
+    message.includes('NetworkError') ||
+    message.includes('无法连接') ||
+    message.includes('fetch') && message.includes('network')
+  );
 }
 
-export async function initDefaultAdmin(): Promise<void> {
-  const existing = await getDB().get('users', 'admin_default');
-  if (!existing) {
-    const admin: User = {
-      id: 'admin_default',
-      username: 'admin',
-      password: await hashPassword('admin'),
-      role: 'admin',
-      displayName: '系统管理员',
-      status: 'active',
-      createdAt: new Date().toISOString(),
-    };
-    await putUser(admin);
+function getErrorMessage(e: any): string {
+  const msg = e?.message || '';
+  if (isNetworkError(msg)) {
+    return '无法连接后端服务，请确认后端已启动';
   }
+  return msg || '无法连接后端服务，请确认后端已启动';
 }
 
-export async function register(username: string, password: string, displayName: string): Promise<{ success: boolean; error?: string }> {
-  const users = await getAllUsers();
-  if (users.some((u) => u.username === username)) {
-    return { success: false, error: '用户名已存在' };
+export async function register(username: string, password: string, displayName: string, region: string): Promise<{ success: boolean; error?: string }> {
+  try {
+    const res = await apiPost('/users/register', { username, password, displayName, region }, true);
+    if (res.error) return { success: false, error: res.error };
+    return { success: true };
+  } catch (e: any) {
+    return { success: false, error: getErrorMessage(e) };
   }
-
-  const user: User = {
-    id: `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-    username,
-    password: await hashPassword(password),
-    role: 'member',
-    displayName,
-    status: 'pending',
-    createdAt: new Date().toISOString(),
-  };
-
-  await putUser(user);
-  return { success: true };
 }
 
 export async function login(username: string, password: string): Promise<{ user: User | null; error?: string }> {
-  const users = await getAllUsers();
-  const hashed = await hashPassword(password);
-  const user = users.find((u) => u.username === username && u.password === hashed);
+  try {
+    const res = await apiPost('/users/login', { username, password }, true);
+    if (res.error) return { user: null, error: res.error };
 
-  if (!user) {
-    return { user: null, error: '用户名或密码错误' };
+    if (!res.data || !res.data.user || !res.data.token) {
+      return { user: null, error: 'Invalid response from server' };
+    }
+
+    const safeUser: User = {
+      id: res.data.user.id,
+      username: res.data.user.username,
+      password: '',
+      role: res.data.user.role || 'member',
+      displayName: res.data.user.displayName || username,
+      status: res.data.user.status || 'active',
+      region: res.data.user.region || '全部',
+      createdAt: res.data.user.createdAt || new Date().toISOString(),
+    };
+
+    localStorage.setItem(AUTH_TOKEN_KEY, res.data.token);
+    localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(safeUser));
+    return { user: safeUser };
+  } catch (e: any) {
+    return { user: null, error: getErrorMessage(e) };
   }
-
-  if (user.status === 'pending') {
-    return { user: null, error: '账户待审核，请联系管理员' };
-  }
-
-  if (user.status === 'rejected') {
-    return { user: null, error: '账户已被拒绝' };
-  }
-
-  const token = await generateToken(user);
-  localStorage.setItem(AUTH_TOKEN_KEY, token);
-  localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(user));
-  return { user };
 }
 
 export function logout(): void {
@@ -88,12 +76,4 @@ export function getCurrentUser(): User | null {
 
 export function isAuthenticated(): boolean {
   return !!localStorage.getItem(AUTH_TOKEN_KEY);
-}
-
-async function generateToken(user: User): Promise<string> {
-  const data = `${user.id}:${user.username}:${Date.now()}`;
-  const encoder = new TextEncoder();
-  const hashBuffer = await crypto.subtle.digest('SHA-256', encoder.encode(data));
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
 }

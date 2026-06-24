@@ -4,15 +4,8 @@ export function useScripts() {
   const scripts = useScriptStore((state) => state.scripts);
   const isLoading = useScriptStore((state) => state.loading);
   const fetchScripts = useScriptStore((state) => state.fetchScripts);
-  const addScript = useScriptStore((state) => state.addScript);
+  const updateScript = useScriptStore((state) => state.updateScript);
   const removeScript = useScriptStore((state) => state.removeScript);
 
-  return {
-    scripts,
-    isLoading,
-    fetchScripts,
-    addScript,
-    removeScript,
-    refreshScripts: fetchScripts,
-  };
+  return { scripts, isLoading, fetchScripts, updateScript, removeScript, refreshScripts: fetchScripts };
 }

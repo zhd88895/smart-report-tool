@@ -8,13 +8,14 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ChevronUp, ChevronDown, ArrowUpDown } from 'lucide-react';
 
 interface Column<T> {
   key: string;
   header: string;
   render?: (row: T) => React.ReactNode;
   width?: string;
+  sortable?: boolean;
 }
 
 interface DataTableProps<T> {
@@ -23,9 +24,12 @@ interface DataTableProps<T> {
   rowKey?: (row: T) => string;
   keyExtractor?: (row: T) => string;
   pageSize?: number;
+  sortKey?: string;
+  sortDir?: 'asc' | 'desc';
+  onSortChange?: (key: string) => void;
 }
 
-export function DataTable<T>({ columns, data, rowKey, keyExtractor, pageSize = 10 }: DataTableProps<T>) {
+export function DataTable<T>({ columns, data, rowKey, keyExtractor, pageSize = 10, sortKey, sortDir, onSortChange }: DataTableProps<T>) {
   const [page, setPage] = useState(1);
   const totalPages = Math.max(1, Math.ceil(data.length / pageSize));
   const start = (page - 1) * pageSize;
@@ -40,7 +44,21 @@ export function DataTable<T>({ columns, data, rowKey, keyExtractor, pageSize = 1
             <TableRow>
               {columns.map((col) => (
                 <TableHead key={col.key} style={{ width: col.width }}>
-                  {col.header}
+                  {col.sortable && onSortChange ? (
+                    <button
+                      className="inline-flex items-center gap-1 hover:text-foreground transition-colors"
+                      onClick={() => onSortChange(col.key)}
+                    >
+                      {col.header}
+                      {sortKey === col.key ? (
+                        sortDir === 'asc' ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />
+                      ) : (
+                        <ArrowUpDown className="h-3.5 w-3.5 opacity-30" />
+                      )}
+                    </button>
+                  ) : (
+                    col.header
+                  )}
                 </TableHead>
               ))}
             </TableRow>

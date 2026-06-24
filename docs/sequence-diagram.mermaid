@@ -1,0 +1,83 @@
+sequenceDiagram
+    participant C as 客户端
+    participant R as 路由
+    participant Auth as 鉴权中间件
+    participant DB as 数据库
+    participant Log as 日志
+
+    C->>R: POST /api/users/login
+    R->>DB: 查询用户
+    DB-->>R: 用户数据
+    R->>Auth: 验证密码(bcrypt)
+    Auth-->>R: 验证结果
+    
+    alt 密码错误
+        R->>DB: 更新登录失败次数
+        R-->>C: 401 Unauthorized
+    else 密码正确
+        R->>Auth: 生成JWT Token
+        Auth-->>R: Token字符串
+        R->>DB: 更新最后登录时间
+        R->>Log: 记录登录成功
+        R-->>C: 200 OK + Token
+    end
+```
+
+sequenceDiagram
+    participant C as 客户端
+    participant R as 路由
+    participant Auth as 鉴权中间件
+    participant Sec as 安全中间件
+    participant Srv as 业务服务
+    participant DB as 数据库
+
+    C->>R: GET /api/scripts (带Authorization头)
+    R->>Auth: 验证Token
+    Auth->>Auth: 验证签名和过期时间
+    Auth-->>R: 解码后的用户信息
+    
+    alt Token无效
+        Auth-->>C: 401 Unauthorized
+    else Token有效
+        R->>Sec: 检查权限
+        Sec-->>R: 权限检查结果
+        
+        alt 权限不足
+            Sec-->>C: 403 Forbidden
+        else 权限足够
+            R->>Srv: 执行业务逻辑
+            Srv->>DB: 查询数据
+            DB-->>Srv: 数据结果
+            Srv-->>R: 业务结果
+            R-->>C: 200 OK + 数据
+        end
+    end
+```
+
+sequenceDiagram
+    participant C as 客户端
+    participant R as 路由
+    participant Sec as 安全中间件
+    participant FS as 文件系统
+
+    C->>R: POST /api/scripts/upload
+    R->>Sec: 验证文件名
+    Sec->>Sec: 检查非法字符
+    Sec-->>R: 文件名验证结果
+    
+    alt 文件名非法
+        Sec-->>C: 400 Bad Request
+    else 文件名合法
+        R->>Sec: 验证文件路径
+        Sec->>Sec: 检查路径遍历
+        Sec-->>R: 路径验证结果
+        
+        alt 路径非法
+            Sec-->>C: 400 Bad Request
+        else 路径合法
+            R->>FS: 保存文件
+            FS-->>R: 保存结果
+            R-->>C: 200 OK
+        end
+    end
+```

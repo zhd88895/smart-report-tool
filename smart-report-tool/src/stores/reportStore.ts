@@ -1,19 +1,18 @@
 import { create } from 'zustand';
 import { Report, ReportGenerationState, OutputFormat } from '@/types';
-import { apiGet, apiDelete, apiGenerateReport } from '@/services/api';
-import { getAllReportsService, createReport as createReportService, deleteReport as deleteReportService, updateReportStatus } from '@/services/reportService';
+import { apiGet, apiDelete, apiGenerateReport, pollReportStatus, pollReportLogs } from '@/services/api';
 
 interface ReportState {
   reports: Report[];
   generationState: ReportGenerationState;
   loading: boolean;
   fetchReports: () => Promise<void>;
-  addReport: (report: Report) => Promise<void>;
   removeReport: (id: string) => Promise<void>;
   setGenerationState: (state: Partial<ReportGenerationState>) => void;
   resetGenerationState: () => void;
-  updateReportStatusState: (id: string, status: Report['status'], fileUrl?: string) => Promise<void>;
   generateReport: (body: any, onLog: (msg: string) => void) => Promise<any>;
+  /** 轮询获取报告状态和日志（用于 SSE 断开后恢复） */
+  pollRunningReport: (reportId: string, onLog: (msg: string) => void) => Promise<{ report: any; done: boolean }>;
 }
 
 const initialGenerationState: ReportGenerationState = {
@@ -36,26 +35,12 @@ export const useReportStore = create<ReportState>((set, get) => ({
 
   fetchReports: async () => {
     set({ loading: true });
-    try {
-      const data = await apiGet('/reports');
-      set({ reports: data.reports || [], loading: false });
-    } catch {
-      const reports = await getAllReportsService();
-      set({ reports, loading: false });
-    }
-  },
-
-  addReport: async (report: Report) => {
-    await createReportService(report);
-    await get().fetchReports();
+    const data = await apiGet('/reports');
+    set({ reports: data.data?.reports || [], loading: false });
   },
 
   removeReport: async (id: string) => {
-    try {
-      await apiDelete(`/reports/${id}`);
-    } catch {
-      await deleteReportService(id);
-    }
+    await apiDelete(`/reports/${id}`);
     await get().fetchReports();
   },
 
@@ -67,12 +52,27 @@ export const useReportStore = create<ReportState>((set, get) => ({
     set({ generationState: { ...initialGenerationState } });
   },
 
-  updateReportStatusState: async (id, status, fileUrl) => {
-    await updateReportStatus(id, status, fileUrl);
-    await get().fetchReports();
-  },
-
   generateReport: async (body, onLog) => {
     return await apiGenerateReport(body, onLog);
+  },
+
+  pollRunningReport: async (reportId, onLog) => {
+    // 先获取当前完整日志
+    const logs = await pollReportLogs(reportId);
+    for (const msg of logs) onLog(msg);
+
+    // 轮询等待完成
+    const maxRetries = 300; // 最多等 5 分钟 (1s × 300)
+    for (let i = 0; i < maxRetries; i++) {
+      await new Promise((r) => setTimeout(r, 1000));
+
+      const { report, isRunning } = await pollReportStatus(reportId);
+      if (!isRunning || report.status !== 'generating') {
+        // 获取最终日志
+        await pollReportLogs(reportId);
+        return { report, done: true };
+      }
+    }
+    throw new Error('轮询超时');
   },
 }));

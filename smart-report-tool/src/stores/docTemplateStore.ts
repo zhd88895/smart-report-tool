@@ -1,13 +1,13 @@
 import { create } from 'zustand';
 import { DocTemplate } from '@/types';
-import { apiGet, apiDelete } from '@/services/api';
-import { getAllDocTemplatesService, addDocTemplate as addDocTemplateService, deleteDocTemplateService } from '@/services/templateService';
+import { apiGet, apiPut, apiPutFormData, apiDelete } from '@/services/api';
 
 interface DocTemplateState {
   docTemplates: DocTemplate[];
   loading: boolean;
   fetchDocTemplates: () => Promise<void>;
-  addDocTemplate: (template: DocTemplate) => Promise<void>;
+  updateDocTemplate: (id: string, updates: Partial<DocTemplate>) => Promise<void>;
+  updateDocTemplateWithFile: (id: string, formData: FormData) => Promise<void>;
   removeDocTemplate: (id: string) => Promise<void>;
 }
 
@@ -17,29 +17,29 @@ export const useDocTemplateStore = create<DocTemplateState>((set, get) => ({
 
   fetchDocTemplates: async () => {
     set({ loading: true });
-    const local = await getAllDocTemplatesService().catch(() => []);
-    const localMap = new Map<string, DocTemplate>(local.map((t: DocTemplate) => [t.id, t]));
-    try {
-      const data = await apiGet('/templates');
-      const remote: DocTemplate[] = (data.templates || []);
-      const merged = remote.map((r) => localMap.get(r.id) ?? r);
-      for (const t of local) {
-        if (!merged.find((m) => m.id === t.id)) merged.push(t);
-      }
-      set({ docTemplates: merged, loading: false });
-    } catch {
-      set({ docTemplates: local, loading: false });
-    }
+    const data = await apiGet('/templates');
+    set({ docTemplates: data.data?.templates || [], loading: false });
   },
 
-  addDocTemplate: async (template: DocTemplate) => {
-    await addDocTemplateService(template);
+  updateDocTemplate: async (id: string, updates: Partial<DocTemplate>) => {
+    const body: Record<string, unknown> = {};
+    const allowed = ['name','description'];
+    for (const key of allowed) {
+      if (updates[key as keyof DocTemplate] !== undefined) {
+        body[key] = updates[key as keyof DocTemplate];
+      }
+    }
+    await apiPut(`/templates/${id}`, body);
+    await get().fetchDocTemplates();
+  },
+
+  updateDocTemplateWithFile: async (id: string, formData: FormData) => {
+    await apiPutFormData(`/templates/${id}`, formData);
     await get().fetchDocTemplates();
   },
 
   removeDocTemplate: async (id: string) => {
-    try { await apiDelete(`/templates/${id}`); } catch {}
-    await deleteDocTemplateService(id);
+    await apiDelete(`/templates/${id}`);
     await get().fetchDocTemplates();
   },
 }));

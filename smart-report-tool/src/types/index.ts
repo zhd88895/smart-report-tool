@@ -4,6 +4,7 @@ export type LogCategory = 'host' | 'storage' | 'database' | 'virtualization' | '
 export type ReportStatus = 'generating' | 'success' | 'failed';
 export type AIIntent = 'query_report' | 'analyze_data' | 'general';
 export type ScriptType = 'python' | 'bat' | 'ps1' | 'sh' | 'powershell';
+export type ScriptRegion = '全部' | '华南区' | '西北区' | '华东区' | '东北区' | '西南区' | '华北区' | '北京区' | '华中区';
 export type DocTemplateType = 'docx' | 'xlsx' | 'md' | 'pdf';
 export type OutputFormat = 'docx' | 'xlsx' | 'md' | 'pdf' | 'html';
 export type AuxFileType = 'txt' | 'xlsx' | 'md' | 'html' | 'csv' | 'json';
@@ -15,15 +16,16 @@ export interface User {
   role: UserRole;
   displayName: string;
   status: UserStatus;
+  region: ScriptRegion;
   createdAt: string;
 }
 
 export interface AuxFile {
   name: string;
   size: number;
-  type: AuxFileType;
-  /** Base64 编码的文件内容 */
-  content: string;
+  /** 文件系统路径（后端）或 Base64 内容（仅上传时前端持有） */
+  path?: string;
+  content?: string;
 }
 
 export interface Script {
@@ -31,11 +33,17 @@ export interface Script {
   name: string;
   description: string;
   scriptType: ScriptType;
+  /** 适用区域 */
+  region: ScriptRegion;
+  /** 巡检数据格式（仅允许字母数字和连字符，逗号或空格分隔） */
+  inputFormats: string;
+  /** 是否手动输入巡检数据格式 */
+  inputFormatManual: boolean;
   version: string;
   category: LogCategory;
   fileName: string;
+  filePath?: string;
   fileSize: number;
-  content: string;
   /** 是否需要关联模板来生成报告 */
   templateRequired: boolean;
   /** 关联的多个模板ID */
@@ -44,6 +52,13 @@ export interface Script {
   auxiliaryFiles: AuxFile[];
   /** Python 依赖包列表，如 ["python-docx", "pandas>=1.0"] */
   requirements: string[];
+  /** 依赖安装状态 */
+  depsStatus?: {
+    status: 'none' | 'installing' | 'done' | 'failed';
+    log: string;
+    packages: string[];
+    error?: string;
+  };
   uploadedAt: string;
   uploadedBy: string;
 }
@@ -53,14 +68,15 @@ export interface DocTemplate {
   name: string;
   description: string;
   fileName: string;
+  filePath?: string;
   fileSize: number;
   fileType: DocTemplateType;
-  /** Base64 编码的文件内容 */
-  content: string;
-  /** 匹配的脚本类型 */
-  compatibleScriptType: ScriptType;
+  /** 适配的脚本类型 */
+  compatibleScriptType?: ScriptType;
+  category?: string;
+  templateRequired?: boolean;
   uploadedAt: string;
-  uploadedBy: string;
+  uploadedBy?: string;
 }
 
 export interface ExecutionLog {
@@ -82,25 +98,40 @@ export interface Report {
   type: LogCategory;
   date: string;
   author: string;
-  authorId: string;
   templateId: string;
   /** 使用的脚本ID */
   scriptId?: string;
   /** 使用的脚本名称 */
   scriptName?: string;
-  /** 原始巡检文件名 */
-  inputFileName?: string;
   /** 输出格式 */
   outputFormat?: OutputFormat;
   status: ReportStatus;
-  logs: string[];
-  /** 生成后的报告内容（HTML/base64） */
-  generatedContent?: string;
-  fileUrl?: string;
-  aiAnalysis?: string;
+  /** 报告所属区域（从生成脚本继承） */
+  region?: string;
   /** 后端执行日志文件路径 */
   logFilePath?: string;
+  /** 后端报告文件路径（第一个，兼容旧数据） */
+  filePath?: string;
+  /** 后端报告文件路径（全部） */
+  filePaths?: string[];
+  /** 工作目录路径 */
+  workspaceDir?: string;
   createdAt: string;
+  /** 联合判断详细信息 */
+  judgment?: {
+    /** 脚本退出码 */
+    exitCode: number;
+    /** 退出码是否表示成功 */
+    exitCodeSuccess: boolean;
+    /** 是否生成了新文件 */
+    hasNewFiles: boolean;
+    /** 新生成的文件数量 */
+    newFilesCount: number;
+    /** 是否生成了有效的报告文件 */
+    hasValidReportFiles: boolean;
+    /** 生成的报告文件列表 */
+    generatedReportFiles: string[];
+  };
 }
 
 export interface ConversationMessage {
@@ -136,6 +167,8 @@ export interface InputFileEntry {
   type: string;
   /** 原始文件 */
   file: File;
+  /** SHA-256 哈希值，用于完整性校验 */
+  hash?: string;
   /** 如果是压缩包，解压后的子文件 */
   extractedFiles?: { name: string; size: number; content: string }[];
   /** 是否来自压缩包 */

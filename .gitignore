@@ -1,6 +1,11 @@
 node_modules/
 dist/
-nul
 *.tsbuildinfo
 .codebuddy/
 .workbuddy/
+repo.bundle
+repo-temp/
+data/
+.env
+*.zip
+*.log

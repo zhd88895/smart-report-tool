@@ -4,16 +4,20 @@ import { UserPlus, Shield } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { useAuthStore } from '@/stores/authStore';
 import { ROUTES } from '@/constants/routes';
 import { toast } from 'sonner';
+
+const REGION_LIST = ['华南区', '西北区', '华东区', '东北区', '西南区', '华北区', '北京区', '华中区'];
 
 export default function RegisterPage() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
+  const [region, setRegion] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const register = useAuthStore((state) => state.register);
   const navigate = useNavigate();
@@ -33,9 +37,13 @@ export default function RegisterPage() {
       toast.error('两次输入的密码不一致');
       return;
     }
+    if (!region) {
+      toast.error('请选择所属区域');
+      return;
+    }
 
     setIsLoading(true);
-    const result = await register(username, password, displayName);
+    const result = await register(username, password, displayName, region);
     setIsLoading(false);
 
     if (result.success) {
@@ -77,6 +85,15 @@ export default function RegisterPage() {
                 onChange={(e) => setDisplayName(e.target.value)}
                 required
               />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="reg-region">所属区域 <span className="text-destructive">*</span></Label>
+              <Select value={region} onValueChange={setRegion}>
+                <SelectTrigger id="reg-region"><SelectValue placeholder="请选择区域" /></SelectTrigger>
+                <SelectContent>
+                  {REGION_LIST.map((r) => (<SelectItem key={r} value={r}>{r}</SelectItem>))}
+                </SelectContent>
+              </Select>
             </div>
             <div className="space-y-2">
               <Label htmlFor="reg-password">密码</Label>

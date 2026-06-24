@@ -1,18 +1,20 @@
 import { useEffect } from 'react';
 import { AppRouter } from './router';
 import { useAuthStore } from './stores/authStore';
-import { initDatabase } from './services/db';
+import ErrorBoundary from './components/ErrorBoundary';
 
 function App() {
   const initAuth = useAuthStore((state) => state.initAuth);
 
   useEffect(() => {
-    initDatabase().then(() => {
-      initAuth();
-    });
+    initAuth();
   }, [initAuth]);
 
-  return <AppRouter />;
+  return (
+    <ErrorBoundary>
+      <AppRouter />
+    </ErrorBoundary>
+  );
 }
 
 export default App;
