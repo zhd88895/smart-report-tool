@@ -167,12 +167,14 @@ async function createSchema(): Promise<void> {
 
   await execAsync(schema);
 
-  // 迁移：为旧版 reports 表添加 file_paths 列（如果尚未存在）
-  try {
-    await runAsync('ALTER TABLE reports ADD COLUMN file_paths TEXT');
-    logger.info('数据库迁移: 已添加 reports.file_paths 列');
-  } catch (error: any) {
-    if (!error.message?.includes('duplicate column name')) {
+  // 迁移：为旧版 reports 表添加 type/region/date/author/created_at 列
+  for (const col of ['type', 'region', 'date', 'author', 'created_at']) {
+    try {
+      await runAsync(`ALTER TABLE reports ADD COLUMN ${col} TEXT`);
+      logger.info(`数据库迁移: 已添加 reports.${col} 列`);
+    } catch (error: any) {
+      if (!error.message?.includes('duplicate column name')) {
+      }
     }
   }
 }

@@ -268,10 +268,10 @@ export default function ReportsPage() {
 
   const columns = [
     { key: 'name', header: '报告名称', sortable: true },
-    { key: 'type', header: '类型', sortable: true, render: (item: Report) => LOG_CATEGORY_LABELS[item.type] },
+    { key: 'type', header: '类型', sortable: true, render: (item: Report) => LOG_CATEGORY_LABELS[item.type] || item.type || '-' },
     { key: 'region', header: '区域', sortable: true, render: (item: Report) => item.region || '全部' },
-    { key: 'date', header: '日期', sortable: true },
-    { key: 'author', header: '作者', sortable: true },
+    { key: 'date', header: '日期', sortable: true, render: (item: Report) => item.date ? formatDate(item.date) : (item as any).generatedAt ? formatDate((item as any).generatedAt) : '-' },
+    { key: 'author', header: '作者', sortable: true, render: (item: Report) => item.author || (item as any).generatedBy || '-' },
     {
       key: 'status',
       header: '状态',

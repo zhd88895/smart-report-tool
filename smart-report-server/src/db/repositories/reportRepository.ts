@@ -26,6 +26,12 @@ function rowToReport(row: any): Report {
     error: row.error,
     logs: safeJsonParse<string[]>(row.logs, []),
     filePaths: safeJsonParse<string[]>(row.file_paths, []),
+    // 前端兼容字段
+    type: row.type || row.category || '',
+    region: row.region || '',
+    date: row.date || row.generated_at,
+    author: row.author || row.generated_by || 'unknown',
+    createdAt: row.created_at || row.generated_at,
   };
 }
 
@@ -55,6 +61,11 @@ function reportToRow(report: Report): any[] {
     report.error || null,
     JSON.stringify(report.logs || []),
     JSON.stringify(report.filePaths || []),
+    report.type || null,      // NEW
+    report.region || null,    // NEW
+    report.date || null,      // NEW
+    report.author || null,    // NEW
+    report.createdAt || null, // NEW
   ];
 }
 
@@ -85,8 +96,9 @@ export const reportRepository = {
   async create(report: Report): Promise<Report> {
     await runAsync(
       `INSERT INTO reports (id, name, description, script_id, script_name, template_id, template_name,
-        output_format, workspace_dir, generated_at, generated_by, status, error, logs, file_paths)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        output_format, workspace_dir, generated_at, generated_by, status, error, logs, file_paths,
+        type, region, date, author, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       reportToRow(report)
     );
     return report;

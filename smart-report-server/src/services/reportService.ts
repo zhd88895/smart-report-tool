@@ -130,6 +130,16 @@ export interface Report {
   logs: string[];
   /** 报告文件路径列表（相对 workspaceDir） */
   filePaths?: string[];
+  /** 报告类型（LogCategory，从脚本继承） */
+  type?: string;
+  /** 报告所属区域（从脚本继承） */
+  region?: string;
+  /** 报告日期（前端展示用，同 generatedAt） */
+  date?: string;
+  /** 报告作者（前端展示用，同 generatedBy） */
+  author?: string;
+  /** 创建时间（前端展示用，同 generatedAt） */
+  createdAt?: string;
   /** 联合判断详细信息 */
   judgment?: {
     /** 脚本退出码 */
@@ -377,18 +387,25 @@ export class ReportService {
     await this.prepareWorkspace(workspaceDir, script, template, inputFiles, inputHashes);
 
     // 创建 DB 记录（立即保存，status: generating）
+    const now = new Date().toISOString();
     const initialReport: Report = {
       id: reportId,
-      name: reportInfo.name || `报告_${new Date().toISOString().slice(0, 10)}`,
+      name: reportInfo.name || `报告_${now.slice(0, 10)}`,
       description: reportInfo.description || '',
       scriptId, scriptName: script.name,
       templateId: template?.id, templateName: template?.fileName,
       outputFormat, workspaceDir,
-      generatedAt: new Date().toISOString(),
+      generatedAt: now,
       generatedBy,
       status: 'generating',
       logs: [],
       filePaths: [],
+      // 从脚本继承 type 和 region
+      type: script.category || '',
+      region: script.region || '',
+      date: now,
+      author: generatedBy,
+      createdAt: now,
     };
     await reportRepository.create(initialReport);
 
@@ -887,9 +904,10 @@ export class ReportService {
 
       // 创建报告记录，只保存有效的报告输出文件路径
       const reportFilePaths = outputFileEntries.map((f) => f.path);
+      const now = new Date().toISOString();
       const report: Report = {
         id: reportId,
-        name: reportInfo.name || `报告_${new Date().toISOString().slice(0, 10)}`,
+        name: reportInfo.name || `报告_${now.slice(0, 10)}`,
         description: reportInfo.description || '',
         scriptId,
         scriptName: script.name,
@@ -897,12 +915,17 @@ export class ReportService {
         templateName: template?.fileName,
         outputFormat,
         workspaceDir,
-        generatedAt: new Date().toISOString(),
+        generatedAt: now,
         generatedBy,
         status: finalStatus,
         error: errorMessage,
         logs: logMessages,
         filePaths: reportFilePaths,
+        type: script.category || '',
+        region: script.region || '',
+        date: now,
+        author: generatedBy,
+        createdAt: now,
         // 添加联合判断的详细信息
         judgment: {
           exitCode: executionResult.code,
