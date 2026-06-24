@@ -11,7 +11,6 @@ import bcrypt from 'bcryptjs';
 import { userRepository } from '../db/repositories';
 import { logger, getLogger, generateTraceId, Logger } from '../utils/logger';
 import { config } from '../config';
-import { generateToken } from '../middleware/auth';
 
 // 模块级日志实例（核心业务模块）
 const log = getLogger('UserService', 'core');
@@ -143,7 +142,7 @@ export class UserService {
   async login(
     username: string,
     password: string
-  ): Promise<{ user: SafeUser; token: string }> {
+  ): Promise<{ user: SafeUser }> {
     const traceId = generateTraceId();
     log.info(`⇢ login`, traceId, { username });
 
@@ -209,19 +208,12 @@ export class UserService {
       lastLoginAt: new Date().toISOString(),
     });
 
-    // 生成JWT Token
-    const token = generateToken({
-      userId: user.id,
-      username: user.username,
-      role: user.role,
-    });
-
     log.info(`✓ login 完成: ${username}`, traceId, {
       userId: user.id,
       role: user.role,
     });
 
-    return { user: safeUser, token };
+    return { user: safeUser };
   }
 
   /**

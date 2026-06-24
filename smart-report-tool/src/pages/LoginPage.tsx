@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Checkbox } from '@/components/ui/checkbox';
 import { useAuthStore } from '@/stores/authStore';
 import { ROUTES } from '@/constants/routes';
 import { toast } from 'sonner';
@@ -12,6 +13,7 @@ import { toast } from 'sonner';
 export default function LoginPage() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [rememberMe, setRememberMe] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const login = useAuthStore((state) => state.login);
   const navigate = useNavigate();
@@ -19,7 +21,7 @@ export default function LoginPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
-    const result = await login(username, password);
+    const result = await login(username, password, rememberMe);
     setIsLoading(false);
     if (result.success) {
       toast.success('登录成功');
@@ -61,6 +63,16 @@ export default function LoginPage() {
                 onChange={(e) => setPassword(e.target.value)}
                 required
               />
+            </div>
+            <div className="flex items-center space-x-2">
+              <Checkbox
+                id="rememberMe"
+                checked={rememberMe}
+                onCheckedChange={(checked) => setRememberMe(checked === true)}
+              />
+              <Label htmlFor="rememberMe" className="text-sm cursor-pointer">
+                记住登录状态（7天内免登录）
+              </Label>
             </div>
             <Button type="submit" className="w-full" disabled={isLoading}>
               <LogIn className="mr-2 h-4 w-4" />

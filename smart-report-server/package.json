@@ -1,6 +1,6 @@
 {
   "name": "smart-report-server",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "智能报告生成工具后端服务",
   "main": "dist/index.js",
   "scripts": {
@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
+    "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
     "dotenv": "^16.3.1",
     "express": "^4.21.2",
@@ -23,6 +24,7 @@
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.2",
+    "@types/cookie-parser": "^1.4.10",
     "@types/cors": "^2.8.17",
     "@types/express": "^5.0.0",
     "@types/jsonwebtoken": "^9.0.1",

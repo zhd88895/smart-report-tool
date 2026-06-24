@@ -6,6 +6,7 @@ dist/
 repo.bundle
 repo-temp/
 data/
+smart-report-server/data/
 .env
 *.zip
 *.log

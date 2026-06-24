@@ -17,11 +17,13 @@
  */
 
 import express, { Request, Response, NextFunction } from 'express';
+import cookieParser from 'cookie-parser';
 import { loadConfig, getConfig } from './config';
 import { logger, getLogger, generateTraceId, LogLevel, Logger } from './utils/logger';
 import { corsMiddleware } from './middleware/cors';
 import { ApiResponse } from './types';
 import { initializeDatabase } from './db/init';
+import { sessionService } from './services/sessionService';
 
 // 导入路由模块
 import { userRoutes } from './routes/users';
@@ -44,6 +46,16 @@ initializeDatabase().catch((error) => {
   process.exit(1);
 });
 
+// 清理过期会话（后台执行，不阻塞启动）
+setTimeout(async () => {
+  try {
+    const cleaned = await sessionService.cleanupExpiredSessions(config.SERVER_INSTANCE_ID);
+    logger.info(`启动时清理了 ${cleaned} 个过期会话`);
+  } catch (err) {
+    logger.warn(`清理过期会话失败: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}, 1000);
+
 // ═══════════════════════════════════════════════════════
 //  Express 应用初始化
 // ═══════════════════════════════════════════════════════
@@ -56,6 +68,9 @@ const app = express();
 
 /** CORS中间件 - 处理跨域请求 */
 app.use(corsMiddleware);
+
+/** Cookie解析中间件 */
+app.use(cookieParser());
 
 /** 请求体解析 - JSON格式，限制10MB */
 app.use(express.json({ limit: '10mb' }));
@@ -215,6 +230,9 @@ const server = app.listen(config.PORT, () => {
   startupLogger.info(`  日志格式: ${config.LOG_FORMAT}`);
   startupLogger.info(`  允许来源: ${config.ALLOWED_ORIGINS.join(', ')}`);
   startupLogger.info(`  JWT过期: ${config.JWT_EXPIRES_IN}`);
+  startupLogger.info(`  会话超时: ${config.SESSION_EXPIRY_MINUTES}分钟`);
+  startupLogger.info(`  记住我天数: ${config.REMEMBER_ME_DAYS}天`);
+  startupLogger.info(`  实例ID: ${config.SERVER_INSTANCE_ID.slice(0, 20)}...`);
   startupLogger.info(`  bcrypt轮数: ${config.BCRYPT_ROUNDS}`);
   startupLogger.info(`  环境: ${process.env.NODE_ENV || 'development'}`);
   startupLogger.info('═══════════════════════════════════════════════════════');

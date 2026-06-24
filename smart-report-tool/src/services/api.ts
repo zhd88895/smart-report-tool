@@ -1,3 +1,12 @@
+/**
+ * API 服务模块（Cookie 认证版）
+ *
+ * 改造后：
+ * - 不再通过 Authorization header 传递 JWT
+ * - 默认使用 credentials: 'include' 自动发送 HttpOnly Cookie
+ * - 401 响应时自动触发登出事件
+ */
+
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:3001/api';
 
 export function getApiUrl(path: string): string {
@@ -13,40 +22,24 @@ export function clearRunningReportId(): void {
   sessionStorage.removeItem('running_report_id');
 }
 
-// Token management
-const AUTH_TOKEN_KEY = 'smart_report_auth_token';
-
-export function getToken(): string | null {
-  return localStorage.getItem(AUTH_TOKEN_KEY);
-}
-
-export function setToken(token: string): void {
-  localStorage.setItem(AUTH_TOKEN_KEY, token);
-}
-
-export function removeToken(): void {
-  localStorage.removeItem(AUTH_TOKEN_KEY);
-}
-
-// Helper to get auth headers
-function getAuthHeaders(): Record<string, string> {
-  const token = getToken();
-  if (token) {
-    return {
-      'Authorization': `Bearer ${token}`,
-    };
-  }
-  return {};
-}
-
 // Handle 401 responses - redirect to login
 function handleUnauthorized(): void {
-  removeToken();
   // Dispatch a custom event that the auth store can listen to
   window.dispatchEvent(new CustomEvent('auth:unauthorized'));
 }
 
-// Generic fetch wrapper with auth
+/**
+ * 获取默认的 fetch 选项（自动携带 Cookie）
+ */
+function getDefaultOptions(): RequestInit {
+  return {
+    credentials: 'include', // 自动发送 HttpOnly Cookie
+  };
+}
+
+/**
+ * 通用 fetch 封装（自动携带 Cookie）
+ */
 export async function fetchWithAuth(
   url: string,
   options: RequestInit = {},
@@ -55,13 +48,7 @@ export async function fetchWithAuth(
 ): Promise<Response> {
   const headers = new Headers(options.headers);
 
-  // Add auth headers (skip Content-Type for FormData, browser sets it with boundary)
-  const authHeaders = getAuthHeaders();
-  Object.entries(authHeaders).forEach(([key, value]) => {
-    headers.set(key, value);
-  });
-
-  // Don't set Content-Type for FormData (browser handles it)
+  // 如果是 FormData，浏览器自动设置 Content-Type（含 boundary），不手动设置
   if (!extraOptions?.isFormData) {
     if (!headers.has('Content-Type')) {
       headers.set('Content-Type', 'application/json');
@@ -69,6 +56,7 @@ export async function fetchWithAuth(
   }
 
   const response = await fetch(url, {
+    ...getDefaultOptions(),
     ...options,
     headers,
     signal: extraOptions?.signal,
@@ -110,8 +98,6 @@ export async function apiPost(
     isFormData ? { isFormData: true } : undefined
   );
 
-  // 非 2xx 响应统一抛异常，由调用方 catch 处理。
-  // 优先使用后端返回的 error/message 字段作为错误信息。
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
     throw new Error(
@@ -159,10 +145,7 @@ export async function apiPutFormData(path: string, formData: FormData): Promise<
 }
 
 /**
- * 下载文件（通过 fetch + Blob URL，确保携带认证头）
- * 
- * @param path - API 路径，如 /scripts/:id/download
- * @param filename - 下载后的文件名
+ * 下载文件（通过 fetch + Blob URL，确保携带 Cookie）
  */
 export async function downloadFile(path: string, filename: string): Promise<void> {
   const res = await fetchWithAuth(`${API_BASE}${path}`);
@@ -176,7 +159,6 @@ export async function downloadFile(path: string, filename: string): Promise<void
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
-  // 延迟释放 Blob URL 确保下载启动
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
@@ -193,7 +175,9 @@ export async function apiPatch(path: string, body?: any): Promise<any> {
   return data;
 }
 
-// Generate report with multipart upload (includes actual File objects)
+/**
+ * 生成报告（SSE 事件流，携带 Cookie）
+ */
 export async function apiGenerateReport(
   params: {
     scriptId: string;
@@ -245,7 +229,6 @@ export async function apiGenerateReport(
 
   if (!reader) throw new Error('No response body');
 
-  // 日志缓冲：高频日志流分批回调，避免 React 状态更新过于频繁
   let logBuffer: string[] = [];
   let flushTimer: ReturnType<typeof setTimeout> | null = null;
   const FLUSH_INTERVAL_MS = 80;
@@ -277,7 +260,6 @@ export async function apiGenerateReport(
 
       buffer += decoder.decode(value, { stream: true });
 
-      // 按 SSE 事件边界（双换行）分割，保留未完整事件
       const eventEndIndex = buffer.lastIndexOf('\n\n');
       if (eventEndIndex === -1) continue;
 
@@ -292,11 +274,8 @@ export async function apiGenerateReport(
         let dataPayload = '';
 
         for (const line of lines) {
-          if (line.startsWith('event: ')) {
-            eventName = line.slice(7).trim();
-          } else if (line.startsWith('data: ')) {
-            dataPayload += line.slice(6);
-          }
+          if (line.startsWith('event: ')) eventName = line.slice(7).trim();
+          else if (line.startsWith('data: ')) dataPayload += line.slice(6);
         }
 
         if (dataPayload) {
@@ -305,7 +284,6 @@ export async function apiGenerateReport(
             if (eventName === 'log' && data.message !== undefined) {
               queueLog(String(data.message));
             } else if (eventName === 'started' && data.reportId) {
-              // 保存 reportId 到 sessionStorage 供页面切换后轮询恢复
               sessionStorage.setItem('running_report_id', data.reportId);
             } else if (eventName === 'complete' && data.report) {
               sessionStorage.removeItem('running_report_id');
@@ -315,7 +293,6 @@ export async function apiGenerateReport(
               throw new Error(data.error || '报告生成失败');
             }
           } catch (parseError) {
-            // 如果 JSON 解析失败，尝试作为纯文本日志输出
             if (eventName === 'log') {
               queueLog(String(dataPayload));
             }
@@ -333,14 +310,12 @@ export async function apiGenerateReport(
 
 // ── 轮询 API（用于 SSE 断开后恢复日志显示）──
 
-/** 轮询获取报告最新状态 */
 export async function pollReportStatus(reportId: string): Promise<{ report: any; isRunning: boolean }> {
   const res = await fetchWithAuth(`${API_BASE}/reports/${reportId}`);
   if (!res.ok) throw new Error(`Poll status failed: ${res.status}`);
   return res.json().then((d) => d.data);
 }
 
-/** 轮询获取报告日志 */
 export async function pollReportLogs(reportId: string): Promise<string[]> {
   const res = await fetchWithAuth(`${API_BASE}/reports/${reportId}/logs`);
   if (!res.ok) throw new Error(`Poll logs failed: ${res.status}`);

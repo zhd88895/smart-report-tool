@@ -61,6 +61,3 @@ pause >nul
 
 start http://localhost:5173
 
-echo.
-echo To stop services, run stop.bat
-pause

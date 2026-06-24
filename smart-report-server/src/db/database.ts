@@ -12,6 +12,7 @@ import path from 'path';
 import { existsSync, mkdirSync } from 'fs';
 import { getConfig } from '../config';
 import { logger, getLogger } from '../utils/logger';
+import { sessionService } from '../services/sessionService';
 
 // 模块级日志实例（其他模块，仅 ERROR）
 const log = getLogger('Database', 'other');
@@ -166,6 +167,9 @@ async function createSchema(): Promise<void> {
   `;
 
   await execAsync(schema);
+
+  // 初始化会话表
+  await sessionService.initTable();
 
   // 迁移：为旧版 reports 表添加 type/region/date/author/created_at 列
   for (const col of ['type', 'region', 'date', 'author', 'created_at']) {

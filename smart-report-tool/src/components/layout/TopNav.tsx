@@ -1,4 +1,5 @@
 import { useNavigate } from 'react-router-dom';
+import { useState } from 'react';
 import { LogOut, Settings } from 'lucide-react';
 import { useAuthStore } from '@/stores/authStore';
 import { useUIStore } from '@/stores/uiStore';
@@ -15,10 +16,16 @@ export function TopNav() {
   const { user, logout } = useAuthStore();
   const { sidebarCollapsed } = useUIStore();
   const navigate = useNavigate();
+  const [loggingOut, setLoggingOut] = useState(false);
 
-  const handleLogout = () => {
-    logout();
-    navigate(ROUTES.LOGIN);
+  const handleLogout = async () => {
+    setLoggingOut(true);
+    try {
+      await logout();
+    } finally {
+      setLoggingOut(false);
+      navigate(ROUTES.LOGIN);
+    }
   };
 
   const roleLabel = user?.role ? (ROLE_LABELS[user.role] || user.role) : '';
@@ -53,9 +60,9 @@ export function TopNav() {
               <Settings className="mr-2 h-4 w-4" />
               <span>个人设置</span>
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={handleLogout}>
+            <DropdownMenuItem onClick={handleLogout} disabled={loggingOut}>
               <LogOut className="mr-2 h-4 w-4" />
-              <span>退出登录</span>
+              <span>{loggingOut ? '退出中...' : '退出登录'}</span>
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>

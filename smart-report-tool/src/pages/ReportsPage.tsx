@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
 import { Download, Trash2, Search, FileText, FolderOpen, Package, X as XIcon, Check, Users, Calendar, MapPin, Tag, CheckCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Tooltip } from '@/components/ui/tooltip';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -13,7 +14,7 @@ import { useReports } from '@/hooks/useReports';
 import { useAuthStore } from '@/stores/authStore';
 import { useUserStore } from '@/stores/userStore';
 import { Report, ScriptRegion } from '@/types';
-import { formatDate } from '@/utils/formatters';
+import { formatDate, formatDateShort } from '@/utils/formatters';
 import { LOG_CATEGORIES, LOG_CATEGORY_LABELS } from '@/constants/categories';
 import { canAccess } from '@/utils/permissions';
 import { getApiUrl, fetchWithAuth } from '@/services/api';
@@ -31,7 +32,7 @@ const REGION_LIST: ScriptRegion[] = ['全部', '华南区', '西北区', '华东
 
 interface ReportFileInfo { index: number; name: string; size: number; }
 
-function downloadFile(reportId: string, fileIndex: number) {
+function downloadFile(reportId: string, fileIndex: number, fileName: string) {
   const url = getApiUrl(`/reports/${reportId}/download?fileIndex=${fileIndex}`);
   fetchWithAuth(url).then(async (res) => {
     if (!res.ok) { safeToastError('文件不存在或已被清理'); return; }
@@ -39,10 +40,7 @@ function downloadFile(reportId: string, fileIndex: number) {
     const objUrl = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = objUrl;
-    // 优先用 Content-Disposition（后端返回脚本原文件名，需解码）
-    const cd = res.headers.get('Content-Disposition');
-    const match = cd?.match(/filename="?([^"]+)"?/);
-    a.download = match ? decodeURIComponent(match[1]) : `report`;
+    a.download = fileName;
     a.click();
     URL.revokeObjectURL(objUrl);
   }).catch(() => {
@@ -164,7 +162,7 @@ export default function ReportsPage() {
         if (filteredFiles.length > 0) {
           setReportFiles(filteredFiles.map((f: any, i: number) => ({
             index: i,
-            name: f.name || `file_${i + 1}`,
+            name: (f.name || '').split(/[/\\]/).pop() || `file_${i + 1}`,
             size: f.size || 0,
           })));
           setFilesLoading(false);
@@ -270,7 +268,7 @@ export default function ReportsPage() {
     { key: 'name', header: '报告名称', sortable: true },
     { key: 'type', header: '类型', sortable: true, render: (item: Report) => LOG_CATEGORY_LABELS[item.type] || item.type || '-' },
     { key: 'region', header: '区域', sortable: true, render: (item: Report) => item.region || '全部' },
-    { key: 'date', header: '日期', sortable: true, render: (item: Report) => item.date ? formatDate(item.date) : (item as any).generatedAt ? formatDate((item as any).generatedAt) : '-' },
+    { key: 'date', header: '日期', sortable: true, render: (item: Report) => item.date ? formatDateShort(item.date) : (item as any).generatedAt ? formatDateShort((item as any).generatedAt) : '-' },
     { key: 'author', header: '作者', sortable: true, render: (item: Report) => item.author || (item as any).generatedBy || '-' },
     {
       key: 'status',
@@ -278,7 +276,7 @@ export default function ReportsPage() {
       sortable: true,
       render: (item: Report) => <StatusBadge status={item.status} />,
     },
-    { key: 'createdAt', header: '创建时间', sortable: true, render: (item: Report) => formatDate((item as any).generatedAt || item.createdAt) },
+    { key: 'createdAt', header: '创建时间', sortable: true, render: (item: Report) => formatDateShort((item as any).generatedAt || item.createdAt) },
     {
       key: 'actions',
       header: '操作',
@@ -579,14 +577,14 @@ export default function ReportsPage() {
           <DialogHeader>
             <DialogTitle>报告文件 - {filesReport?.name}</DialogTitle>
           </DialogHeader>
-          {reportFiles.length > 1 && !filesLoading && (
+          {!filesLoading && (
             <div className="flex gap-2 pb-1">
               <Button size="sm" onClick={() => {
                 for (let i = 0; i < reportFiles.length; i++) {
-                  setTimeout(() => downloadFile(filesReport!.id, reportFiles[i].index), i * 300);
+                  setTimeout(() => downloadFile(filesReport!.id, reportFiles[i].index, reportFiles[i].name), i * 300);
                 }
               }}>
-                <Download className="mr-1 h-3 w-3" />一键下载全部 ({reportFiles.length})
+                <Download className="mr-1 h-3 w-3" />一键下载全部{reportFiles.length > 0 ? ` (${reportFiles.length})` : ''}
               </Button>
               <Button size="sm" variant="secondary" onClick={async () => {
                 // 立即捕获当前报告信息，防止 dialog 关闭后状态变化
@@ -631,10 +629,12 @@ export default function ReportsPage() {
               reportFiles.map((f) => (
                 <div key={f.index} className="flex items-center justify-between rounded-lg border p-3">
                   <div className="min-w-0 flex-1 mr-3">
-                    <p className="text-sm font-medium truncate" title={f.name}>{f.name}</p>
+                    <Tooltip content={f.name}>
+                      <p className="text-sm font-medium truncate">{f.name}</p>
+                    </Tooltip>
                     <p className="text-xs text-muted-foreground">{formatSize(f.size)}</p>
                   </div>
-                  <Button size="sm" variant="outline" onClick={() => downloadFile(filesReport!.id, f.index)}>
+                  <Button size="sm" variant="outline" onClick={() => downloadFile(filesReport!.id, f.index, f.name)}>
                     <Download className="mr-1 h-3 w-3" />下载
                   </Button>
                 </div>

@@ -9,6 +9,7 @@
 
 import path from 'path';
 import dotenv from 'dotenv';
+import crypto from 'crypto';
 
 // 加载.env文件中的环境变量
 dotenv.config();
@@ -37,6 +38,12 @@ export interface AppConfig {
   LOGS_DIR: string;
   /** 日志输出格式：text 或 json */
   LOG_FORMAT: string;
+  /** 会话空闲超时时间（分钟），默认30 */
+  SESSION_EXPIRY_MINUTES: number;
+  /** "记住我"功能的有效天数，默认7 */
+  REMEMBER_ME_DAYS: number;
+  /** 当前服务器实例ID（每次启动自动生成） */
+  SERVER_INSTANCE_ID: string;
 }
 
 /**
@@ -96,6 +103,9 @@ export function loadConfig(): AppConfig {
     BCRYPT_ROUNDS: parseInt(process.env.BCRYPT_ROUNDS || '12', 10),
     LOGS_DIR: path.join(resolvedDataDir, 'logs'),
     LOG_FORMAT: process.env.LOG_FORMAT || 'text',
+    SESSION_EXPIRY_MINUTES: parseInt(process.env.SESSION_EXPIRY_MINUTES || '30', 10),
+    REMEMBER_ME_DAYS: parseInt(process.env.REMEMBER_ME_DAYS || '7', 10),
+    SERVER_INSTANCE_ID: generateInstanceId(),
   };
   
   // 验证数值范围
@@ -129,6 +139,16 @@ export function getConfig(): AppConfig {
 
 // 模块级配置实例
 let _configInstance: AppConfig | null = null;
+
+// 保存服务器启动时间，用于生成唯一实例ID
+const SERVER_START_TIME = Date.now();
+
+/**
+ * 生成服务器实例ID
+ */
+function generateInstanceId(): string {
+  return `inst_${SERVER_START_TIME}_${crypto.randomBytes(8).toString('hex')}`;
+}
 
 // 导出默认配置实例
 export const config = getConfig();
