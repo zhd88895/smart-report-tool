@@ -357,7 +357,7 @@ export class ReportService {
       scriptId: string;
       templateId?: string;
       outputFormat?: string;
-      reportInfo?: { name?: string; description?: string };
+      reportInfo?: { name?: string; description?: string; author?: string; date?: string; category?: string };
       inputFiles?: Array<{ filename: string; path: string; size: number }>;
       inputHashes?: string[];
       requirements?: string[];
@@ -403,8 +403,8 @@ export class ReportService {
       // 从脚本继承 type 和 region
       type: script.category || '',
       region: script.region || '',
-      date: now,
-      author: generatedBy,
+      date: reportInfo.date || now,
+      author: reportInfo.author || generatedBy,
       createdAt: now,
     };
     await reportRepository.create(initialReport);
@@ -543,6 +543,9 @@ export class ReportService {
       reportInfo?: {
         name?: string;
         description?: string;
+        author?: string;
+        date?: string;
+        category?: string;
       };
       inputFiles?: Array<{
         filename: string;
@@ -923,8 +926,8 @@ export class ReportService {
         filePaths: reportFilePaths,
         type: script.category || '',
         region: script.region || '',
-        date: now,
-        author: generatedBy,
+        date: reportInfo.date || now,
+        author: reportInfo.author || generatedBy,
         createdAt: now,
         // 添加联合判断的详细信息
         judgment: {
