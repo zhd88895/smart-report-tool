@@ -28,18 +28,19 @@ export default function AssistantPage() {
   const isAdmin = user?.role === 'admin';
 
   // 加载对话记录：管理员看全部，其他人只看自己的
+  // 加载后默认选中最新的对话，而非自动创建新对话
   useEffect(() => {
     if (user) {
       fetchConversations(isAdmin ? undefined : user.id);
     }
   }, [user, isAdmin, fetchConversations]);
 
-  // 无当前对话时自动创建新对话
+  // 当对话列表加载完成后，自动选中最近一次对话
   useEffect(() => {
-    if (!currentConversation && user && conversations.length === 0) {
-      createNewConversation(user.id, user.displayName);
+    if (!currentConversation && conversations.length > 0) {
+      setCurrentConversation(conversations[0]);
     }
-  }, [currentConversation, user, conversations.length, createNewConversation]);
+  }, [conversations, currentConversation, setCurrentConversation]);
 
   // 自动滚动消息到底部
   useEffect(() => {
