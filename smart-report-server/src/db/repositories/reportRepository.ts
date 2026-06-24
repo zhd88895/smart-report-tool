@@ -121,10 +121,35 @@ export const reportRepository = {
   },
 
   /** 完整更新报告记录（文件路径、日志等所有字段） */
-  async finalize(id: string, data: { status: string; logs: string[]; filePaths: string[]; error?: string }): Promise<void> {
+  async finalize(id: string, data: {
+    status: string;
+    logs: string[];
+    filePaths: string[];
+    error?: string;
+    /** 补充字段（初始创建时可能不完整，最终更新时补齐） */
+    type?: string;
+    region?: string;
+    date?: string;
+    author?: string;
+    createdAt?: string;
+  }): Promise<void> {
     await runAsync(
-      'UPDATE reports SET status = ?, logs = ?, file_paths = ?, error = ? WHERE id = ?',
-      [data.status, JSON.stringify(data.logs), JSON.stringify(data.filePaths), data.error || null, id]
+      `UPDATE reports SET status = ?, logs = ?, file_paths = ?, error = ?,
+       type = COALESCE(?, type), region = COALESCE(?, region),
+       date = COALESCE(?, date), author = COALESCE(?, author), created_at = COALESCE(?, created_at)
+       WHERE id = ?`,
+      [
+        data.status,
+        JSON.stringify(data.logs),
+        JSON.stringify(data.filePaths),
+        data.error || null,
+        data.type || null,
+        data.region || null,
+        data.date || null,
+        data.author || null,
+        data.createdAt || null,
+        id,
+      ]
     );
   },
 

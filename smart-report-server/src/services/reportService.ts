@@ -400,8 +400,8 @@ export class ReportService {
       status: 'generating',
       logs: [],
       filePaths: [],
-      // 从脚本继承 type 和 region
-      type: script.category || '',
+      // 从脚本继承 region，从表单继承 type/category、date、author
+      type: reportInfo.category || script.category || '',
       region: script.region || '',
       date: reportInfo.date || now,
       author: reportInfo.author || generatedBy,
@@ -461,12 +461,17 @@ export class ReportService {
         await this.flushLogs(reportId, logBuffer);
       }
 
-      // 更新最终状态
+      // 更新最终状态（同时补齐 type/region/date/author 等字段）
       await reportRepository.finalize(reportId, {
         status: report.status,
         logs: report.logs,
         filePaths: report.filePaths || [],
         error: report.error,
+        type: report.type,
+        region: report.region,
+        date: report.date,
+        author: report.author,
+        createdAt: report.createdAt,
       });
 
       emitter.emit('complete', { report });
@@ -924,7 +929,7 @@ export class ReportService {
         error: errorMessage,
         logs: logMessages,
         filePaths: reportFilePaths,
-        type: script.category || '',
+        type: reportInfo.category || script.category || '',
         region: script.region || '',
         date: reportInfo.date || now,
         author: reportInfo.author || generatedBy,
