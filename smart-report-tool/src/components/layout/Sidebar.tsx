@@ -30,6 +30,9 @@ interface MenuGroup {
   items: MenuItem[];
 }
 
+/** 仪表盘：独立于分组之外，固定位于侧边栏第一位（首页） */
+const dashboardItem: MenuItem = { icon: LayoutDashboard, path: ROUTES.DASHBOARD, feature: 'dashboard' };
+
 /** 分组与顺序定义于此，label 统一引用 ROUTE_LABELS 单一来源 */
 const menuGroups: MenuGroup[] = [
   {
@@ -54,7 +57,6 @@ const menuGroups: MenuGroup[] = [
   {
     title: '系统',
     items: [
-      { icon: LayoutDashboard, path: ROUTES.DASHBOARD, feature: 'dashboard' },
       { icon: Users, path: ROUTES.USERS, feature: 'users' },
       { icon: SlidersHorizontal, path: ROUTES.SYSTEM_SETTINGS, feature: 'systemSettings' },
       { icon: Sparkles, path: ROUTES.AI_SETTINGS, feature: 'ai-settings', indent: true },
@@ -93,6 +95,25 @@ export function Sidebar() {
         </button>
       </div>
       <nav className="flex-1 space-y-4 p-2 overflow-y-auto">
+        {/* 仪表盘：独立于分组，固定第一位（登录后的首页） */}
+        {canAccess(user?.role, dashboardItem.feature) && (
+          <div className="border-b border-sidebar-border pb-3">
+            <button
+              onClick={() => navigate(dashboardItem.path)}
+              aria-label={ROUTE_LABELS[dashboardItem.path]}
+              title={ROUTE_LABELS[dashboardItem.path]}
+              className={cn(
+                'flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium transition-colors',
+                location.pathname === dashboardItem.path
+                  ? 'bg-sidebar-accent text-sidebar-foreground'
+                  : 'text-sidebar-foreground/75 hover:bg-sidebar-accent hover:text-sidebar-foreground'
+              )}
+            >
+              <LayoutDashboard className="h-5 w-5 shrink-0" />
+              {!sidebarCollapsed && <span>{ROUTE_LABELS[dashboardItem.path]}</span>}
+            </button>
+          </div>
+        )}
         {visibleGroups.map((group) => (
           <div key={group.title}>
             {!sidebarCollapsed && (
