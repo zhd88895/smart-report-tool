@@ -21,7 +21,7 @@ import { ApiResponse, safeErrorMessage } from '../types';
 import { callUserAI, callUserAIStream, AIMessage } from '../services/aiProviderService';
 import { fileDedupService } from '../services/fileDedupService';
 import { isArchiveFile, extractEntries, smartSelect } from '../services/archiveAnalysisService';
-import { runToolLoop } from '../services/aiTools/registry';
+import { runToolLoop, runToolLoopStream } from '../services/aiTools/registry';
 import { executeRunScript, executeWriteScript } from '../services/aiTools/confirmTools';
 import { aiToolConfirmRepository } from '../db/repositories/aiToolConfirmRepository';
 import { userAIConfigService } from '../services/userAIConfigService';
@@ -109,8 +109,10 @@ export class AIRoutes {
   }
 
   /** 流式聊天（SSE 转发）：先统一调用拿到上游流，再按原逻辑逐行转发；
-   *  enableTools 时降级为非流式 JSON 返回（含 toolCalls/pendingConfirm 字段，
-   *  响应头 X-AI-Tools-NonStream 标记降级；SSE tool_confirm 事件按简报降级为 JSON 字段） */
+   *  enableTools 时走流式工具循环 runToolLoopStream：模型文本增量以
+   *  OpenAI choices[0].delta.content 格式实时转发，工具执行轨迹以
+   *  {type:'tool_call'} 事件推送，结束以 {type:'final'} 事件携带
+   *  message/usage/toolsUsed/pendingConfirm 等完整结果 */
   private async chatStream(req: Request, res: Response): Promise<void> {
     try {
       const { messages = [], modelId, enableTools } = req.body as { messages: AIMessage[]; modelId?: string; enableTools?: boolean };
@@ -118,16 +120,61 @@ export class AIRoutes {
         res.status(400).json({ code: 400, data: null, message: '消息不能为空' } satisfies ApiResponse<null>);
         return;
       }
-      // 工具模式暂不支持流式：走非流式工具循环后以 JSON 返回（含 pendingConfirm），
-      // 响应头 X-AI-Tools-NonStream 标记降级，便于前端按非流式处理
+      // 工具模式：流式工具循环（真实流式输出，不再是 JSON 降级）。
+      // SSE 头在 onReady（首次上游连接成功）时才设置并 flush——
+      // 此前「未配置模型」等错误仍以 JSON 500 返回，前端按非流式错误处理。
       if (enableTools) {
-        const result = await runToolLoop(req.user!.userId, {
-          messages: [{ role: 'system', content: buildToolSystemPrompt() }, ...messages],
-          modelId, feature: 'chat',
-        });
-        if (result.fallback) res.setHeader('X-AI-Fallback', 'true');
-        res.setHeader('X-AI-Tools-NonStream', 'true');
-        res.status(200).json({ code: 200, data: result, message: 'success' } satisfies ApiResponse<any>);
+        let sseStarted = false;
+        const startSse = (fallback: boolean): void => {
+          res.setHeader('Content-Type', 'text/event-stream');
+          res.setHeader('Cache-Control', 'no-cache');
+          res.setHeader('Connection', 'keep-alive');
+          res.setHeader('X-Accel-Buffering', 'no');
+          if (fallback) res.setHeader('X-AI-Fallback', 'true');
+          res.flushHeaders();
+          sseStarted = true;
+        };
+        const writeEvent = (payload: unknown): void => {
+          res.write(`data: ${JSON.stringify(payload)}\n\n`);
+        };
+        try {
+          const result = await runToolLoopStream(
+            req.user!.userId,
+            {
+              messages: [{ role: 'system', content: buildToolSystemPrompt() }, ...messages],
+              modelId, feature: 'chat',
+            },
+            {
+              onReady: ({ fallback }) => startSse(fallback),
+              onTextDelta: (delta) => writeEvent({ choices: [{ delta: { content: delta } }] }),
+              onToolCall: (record) => writeEvent({ type: 'tool_call', data: record }),
+            }
+          );
+          // 防御：循环竟未触发 onReady（理论上不会）时兜底 flush
+          if (!sseStarted) startSse(result.fallback);
+          writeEvent({
+            type: 'final',
+            data: {
+              message: result.message,
+              usage: result.usage,
+              toolsUsed: result.toolsUsed,
+              toolRounds: result.toolRounds,
+              pendingConfirm: result.pendingConfirm,
+              model: result.model,
+              provider: result.provider,
+            },
+          });
+          res.write('data: [DONE]\n\n');
+          res.end();
+        } catch (error: any) {
+          log.error(`工具模式流式聊天失败: ${safeErrorMessage(error)}`);
+          if (!sseStarted && !res.headersSent) {
+            res.status(500).json({ code: 500, data: null, message: safeErrorMessage(error) } satisfies ApiResponse<null>);
+          } else {
+            writeEvent({ type: 'error', data: { message: safeErrorMessage(error) } });
+            res.end();
+          }
+        }
         return;
       }
       // 先调用统一入口（未配置模型等错误在 flush 前以 JSON 返回）

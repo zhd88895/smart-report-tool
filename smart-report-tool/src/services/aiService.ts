@@ -114,8 +114,8 @@ export async function sendMessageStream(
   }
   detectFallbackHeader(res);
 
-  // 工具模式降级：后端以 JSON 一次性返回（含 toolCalls/pendingConfirm），
-  // 按非流式解析，并把完整内容一次性推给 onChunk 保持 UI 行为一致
+  // 工具模式已支持真实流式（后端 SSE：choices delta 增量 + tool_call/final 事件）。
+  // X-AI-Tools-NonStream 旧降级分支保留以兼容未升级的后端
   if (res.headers.get('X-AI-Tools-NonStream') === 'true') {
     const result = parseChatJson(await res.json());
     if (result.content) onChunk(result.content);
@@ -126,6 +126,16 @@ export async function sendMessageStream(
   if (!reader) throw new Error('不支持流式响应');
   const decoder = new TextDecoder();
   let fullText = '';
+  // 工具模式的完整结果（final 事件携带）与逐条工具轨迹（tool_call 事件）
+  interface StreamFinalData {
+    message?: string;
+    usage?: SendMessageResult['usage'];
+    toolsUsed?: ToolCallRecord[];
+    pendingConfirm?: PendingConfirm;
+  }
+  // 用对象持有避免 TS 闭包窄化（handleLine 内赋值在 return 处被推断为 never）
+  const streamState: { finalData: StreamFinalData | null } = { finalData: null };
+  const toolCalls: ToolCallRecord[] = [];
   // 跨 read 循环的行缓冲：TCP 分片可能把一条 data: 行切断，
   // 只处理以 \n 结尾的完整行，不完整部分留给下一轮拼接
   let buffer = '';
@@ -138,9 +148,25 @@ export async function sendMessageStream(
       if (dataPart === '[DONE]') return;
       try {
         const parsed = JSON.parse(dataPart);
+        // 工具模式自定义事件
+        if (parsed.type === 'tool_call') {
+          if (parsed.data) toolCalls.push(parsed.data);
+          return;
+        }
+        if (parsed.type === 'final') {
+          streamState.finalData = parsed.data ?? {};
+          return;
+        }
+        if (parsed.type === 'error') {
+          throw new Error(parsed.data?.message || 'AI 服务暂不可用');
+        }
+        // 普通流式增量（OpenAI choices[0].delta.content 格式）
         const delta = parsed.choices?.[0]?.delta?.content;
         if (delta) { fullText += delta; onChunk(delta); }
-      } catch { /* 忽略无法解析的行 */ }
+      } catch (e) {
+        // 解析失败的行忽略；主动抛出的业务错误继续上抛
+        if (e instanceof Error && !(e instanceof SyntaxError)) throw e;
+      }
     }
   };
   try {
@@ -156,7 +182,15 @@ export async function sendMessageStream(
     // 流结束后若 buffer 还残留完整行，再处理一次
     if (buffer.trim()) handleLine(buffer);
   } finally { reader.releaseLock(); }
-  return { content: fullText };
+  // 工具模式：final.message 是完整结论（pending 暂停时含提示文案），
+  // 优先于流式拼接的 fullText；工具轨迹优先用逐条收集的 tool_call 事件
+  const finalData = streamState.finalData;
+  return {
+    content: finalData?.message || fullText,
+    usage: finalData?.usage ?? undefined,
+    toolCalls: toolCalls.length ? toolCalls : finalData?.toolsUsed ?? undefined,
+    pendingConfirm: finalData?.pendingConfirm ?? undefined,
+  };
 }
 
 /** 确认执行待确认工具（POST /api/ai/tools/confirm），返回执行结果摘要 */

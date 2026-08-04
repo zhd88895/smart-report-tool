@@ -26,6 +26,7 @@
 
 import {
   callUserAI,
+  callUserAIStream,
   type AIToolCall,
   type AIToolDefinition,
   type AIMessage,
@@ -379,4 +380,239 @@ export async function runToolLoop(userId: string, req: UserAIRequest): Promise<T
   const finalResp = await callUserAI(userId, { ...req, messages, tools: undefined });
   accumulateUsage(finalResp);
   return { ...finalResp, usage: sawUsage ? { ...totalUsage } : undefined, toolsUsed, toolRounds };
+}
+
+// ═══════════════════════════════════════════════════════
+//  流式工具循环（AI 助手真实流式输出）
+// ═══════════════════════════════════════════════════════
+
+/** 流式工具循环的回调事件 */
+export interface ToolLoopStreamEvents {
+  /**
+   * 首次上游调用成功、即将开始产出文本时触发（一定早于任何 onTextDelta）。
+   * 路由层应在此设置 SSE 响应头并 flushHeaders——
+   * 这样「未配置模型」等错误仍能在 flush 前以 JSON 500 返回。
+   */
+  onReady?: (info: { fallback: boolean }) => void;
+  /** 模型文本增量（OpenAI delta.content 原文，路由层原样包成 choices 格式转发） */
+  onTextDelta?: (delta: string) => void;
+  /** 每只工具执行完成后触发（含 pending 暂停与同轮 skipped 记录） */
+  onToolCall?: (record: ToolCallRecord) => void;
+}
+
+/** callAIStreamParsed 的解析结果（等价于 UserAIResponse 的流式版） */
+interface ParsedStreamResult {
+  message: string;
+  toolCalls: AIToolCall[];
+  usage?: { promptTokens: number; completionTokens: number; totalTokens: number };
+  model: string;
+  provider: string;
+  fallback: boolean;
+}
+
+/**
+ * 单次流式调用 + SSE 增量解析。
+ *
+ * 逐行解析上游 SSE：
+ * - choices[0].delta.content → 累加并实时回调 onTextDelta
+ * - choices[0].delta.tool_calls → 按 index 累积（id 覆盖、name/arguments 拼接）
+ * - chunk.usage（stream_options.include_usage）→ 捕获为 usage
+ *
+ * 行缓冲与前端 aiService 同款：TCP 分片可能切断 data: 行，
+ * 只处理以 \n 结尾的完整行，流末 flush 残留。
+ */
+async function callAIStreamParsed(
+  userId: string,
+  req: UserAIRequest,
+  onTextDelta?: (delta: string) => void,
+  onReady?: (info: { fallback: boolean }) => void
+): Promise<ParsedStreamResult> {
+  const { stream, model, provider, fallback } = await callUserAIStream(userId, req);
+  // 上游连接已建立，通知路由层 flush SSE 头（之后任何错误都只能走 SSE error 事件）
+  onReady?.({ fallback });
+
+  const reader = stream.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let content = '';
+  const toolMap = new Map<number, { id?: string; name: string; args: string }>();
+  let usage: ParsedStreamResult['usage'];
+
+  const handleLine = (line: string): void => {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith('data:')) return;
+    const dataPart = trimmed.slice(5).trim();
+    if (!dataPart || dataPart === '[DONE]') return;
+    let parsed: any;
+    try {
+      parsed = JSON.parse(dataPart);
+    } catch {
+      return; // 忽略无法解析的行
+    }
+    if (parsed.usage) {
+      usage = {
+        promptTokens: parsed.usage.prompt_tokens ?? 0,
+        completionTokens: parsed.usage.completion_tokens ?? 0,
+        totalTokens: parsed.usage.total_tokens ?? 0,
+      };
+    }
+    const delta = parsed.choices?.[0]?.delta;
+    if (!delta) return;
+    if (typeof delta.content === 'string' && delta.content) {
+      content += delta.content;
+      onTextDelta?.(delta.content);
+    }
+    if (Array.isArray(delta.tool_calls)) {
+      for (const tc of delta.tool_calls) {
+        const idx: number = tc.index ?? 0;
+        const acc = toolMap.get(idx) ?? { name: '', args: '' };
+        if (tc.id) acc.id = tc.id;
+        if (tc.function?.name) acc.name += tc.function.name;
+        if (tc.function?.arguments) acc.args += tc.function.arguments;
+        toolMap.set(idx, acc);
+      }
+    }
+  };
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+      for (const line of lines) handleLine(line);
+    }
+    if (buffer.trim()) handleLine(buffer);
+  } finally {
+    reader.releaseLock();
+  }
+
+  const toolCalls: AIToolCall[] = [...toolMap.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([, acc], i) => ({
+      id: acc.id || `call_stream_${i}`,
+      type: 'function' as const,
+      function: { name: acc.name, arguments: acc.args },
+    }));
+
+  return { message: content, toolCalls, usage, model, provider, fallback };
+}
+
+/**
+ * 工具调用循环（流式版）。
+ *
+ * 与 runToolLoop 逻辑一致（最多 MAX_TOOL_ROUNDS 轮、pending 暂停、
+ * 满轮强制文本结论），区别是每轮调用都走流式：模型文本增量经
+ * events.onTextDelta 实时回调，工具执行结果经 events.onToolCall 回调，
+ * 由路由层包成 SSE 事件推给前端，实现工具模式下也能逐字输出。
+ *
+ * 工具回合模型一般不输出正文；即使输出思考性文字也会实时转发
+ *（生成时可见、最终被 final 事件的完整 message 替换）。
+ */
+export async function runToolLoopStream(
+  userId: string,
+  req: UserAIRequest,
+  events: ToolLoopStreamEvents = {}
+): Promise<ToolLoopResult> {
+  const messages: AIMessage[] = [...req.messages];
+  const toolsUsed: ToolCallRecord[] = [];
+  let toolRounds = 0;
+  const totalUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
+  let sawUsage = false;
+  let readyFired = false;
+
+  const accumulateUsage = (u?: { promptTokens: number; completionTokens: number; totalTokens: number }): void => {
+    if (!u) return;
+    sawUsage = true;
+    totalUsage.promptTokens += u.promptTokens;
+    totalUsage.completionTokens += u.completionTokens;
+    totalUsage.totalTokens += u.totalTokens;
+  };
+
+  const buildResult = (resp: ParsedStreamResult, extra?: Partial<ToolLoopResult>): ToolLoopResult => ({
+    message: resp.message,
+    toolCalls: undefined,
+    usage: sawUsage ? { ...totalUsage } : undefined,
+    model: resp.model,
+    provider: resp.provider,
+    fallback: resp.fallback,
+    toolsUsed,
+    toolRounds,
+    ...extra,
+  });
+
+  const callRound = (roundReq: UserAIRequest): Promise<ParsedStreamResult> =>
+    callAIStreamParsed(userId, roundReq, events.onTextDelta, (info) => {
+      // onReady 只触发一次：首轮连接成功即 flush，后续轮次复用同一条 SSE 流
+      if (readyFired) return;
+      readyFired = true;
+      events.onReady?.(info);
+    });
+
+  for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+    const resp = await callRound({ ...req, messages, tools: TOOL_DEFINITIONS });
+    accumulateUsage(resp.usage);
+
+    const toolCalls = resp.toolCalls;
+    if (toolCalls.length === 0) {
+      // 模型直接给出文本回答（已实时流完），结束循环
+      return buildResult(resp);
+    }
+
+    toolRounds++;
+    log.info(`⇢ 流式工具循环第 ${toolRounds} 轮: ${toolCalls.map((t) => t.function.name).join(', ')}`);
+
+    // 回注助手消息（content 可能为空，表示纯工具调用回合）
+    messages.push({ role: 'assistant', content: resp.message || null, tool_calls: toolCalls });
+
+    // 逐只执行工具并回注结果；遇 pending 工具立即暂停循环
+    for (let i = 0; i < toolCalls.length; i++) {
+      const tc = toolCalls[i];
+      const args = parseToolArgs(tc.function.arguments);
+      const result = await executeTool(userId, tc.function.name, args);
+      const record: ToolCallRecord = { name: tc.function.name, ok: result.ok, summary: result.summary };
+      toolsUsed.push(record);
+      events.onToolCall?.(record);
+
+      if (result.pending && result.pendingId) {
+        log.info(`⏸ 流式工具循环暂停：${tc.function.name} 待用户确认 pendingId=${result.pendingId}`);
+        // 同轮剩余 tool_calls 因暂停不再执行：显式标注 skipped
+        for (const rest of toolCalls.slice(i + 1)) {
+          const skipped: ToolCallRecord = {
+            name: rest.function.name,
+            ok: false,
+            summary: 'skipped：同轮已有待确认操作，该调用本次未执行，可在确认后重新发起',
+          };
+          toolsUsed.push(skipped);
+          events.onToolCall?.(skipped);
+          log.warn(`⤳ 同轮工具调用被跳过: ${rest.function.name}（因 ${tc.function.name} 待确认暂停循环）`);
+        }
+        const pauseMessage =
+          (resp.message ? `${resp.message}\n\n` : '') +
+          `已准备执行操作：${result.argsSummary || result.summary}。\n` +
+          `请在下方确认卡片中点击「确认执行」或「取消」。`;
+        return buildResult(resp, {
+          message: pauseMessage,
+          pendingConfirm: {
+            pendingId: result.pendingId,
+            tool: result.tool || tc.function.name,
+            argsSummary: result.argsSummary || result.summary,
+          },
+        });
+      }
+
+      messages.push({
+        role: 'tool',
+        tool_call_id: tc.id,
+        content: JSON.stringify({ ok: result.ok, summary: result.summary, data: result.data ?? null }),
+      });
+    }
+  }
+
+  // 达到最大轮次后模型仍要调工具：追加一次不带 tools 的流式调用，强制输出文本结论
+  log.warn(`流式工具循环达到最大轮次 ${MAX_TOOL_ROUNDS}，强制输出文本结论`);
+  const finalResp = await callRound({ ...req, messages, tools: undefined });
+  accumulateUsage(finalResp.usage);
+  return buildResult(finalResp);
 }

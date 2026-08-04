@@ -44,8 +44,8 @@ export function useAIAssistant() {
       try {
         // 从配置 store 取会话级选择的模型 id（null 表示用服务端默认）
         const modelId = useAIConfigStore.getState().selectedModelId ?? undefined;
-        // enableTools：后端降级为非流式 JSON（X-AI-Tools-NonStream），
-        // aiService 内部按 JSON 解析并一次性推送 onChunk
+        // enableTools：后端流式工具循环（文本增量实时推送 + tool_call/final 事件），
+        // aiService 内部解析 SSE 并逐段回调 onChunk
         const result = await sendMessageStream(message, history, (chunk) => onChunk?.(chunk), modelId, {
           enableTools: true,
         });
