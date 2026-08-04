@@ -117,6 +117,7 @@ async function migrate() {
         name: script.name,
         description: script.description || '',
         scriptType: script.scriptType || 'python',
+        extraFiles: [],
         region: script.region || '全部',
         inputFormats: script.inputFormats || '',
         inputFormatManual: script.inputFormatManual || false,

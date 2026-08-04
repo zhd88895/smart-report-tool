@@ -1,27 +1,26 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useScriptStore } from '@/stores/scriptStore';
 import { useDocTemplateStore } from '@/stores/docTemplateStore';
 import { useReportStore } from '@/stores/reportStore';
 import { useAuthStore } from '@/stores/authStore';
 import { useLogPersistence } from '@/hooks/useLogPersistence';
-import { Script, OutputFormat, LogCategory, Report } from '@/types';
-import { formatFileSize } from '@/utils/formatters';
-import { BatchFileUploader } from '@/components/report/BatchFileUploader';
-import { Badge } from '@/components/ui/badge';
+import { Script, LogCategory, Report } from '@/types';
+import { AIAnalysisPanel } from '@/components/report/AIAnalysisPanel';
+import { StepScript } from '@/components/report/create/StepScript';
+import { StepTemplate } from '@/components/report/create/StepTemplate';
+import { StepUpload } from '@/components/report/create/StepUpload';
+import { StepInfo } from '@/components/report/create/StepInfo';
+import { StepConfirm } from '@/components/report/create/StepConfirm';
+import { GeneratingResultCard } from '@/components/report/create/GeneratingResultCard';
+import { OUTPUT_FORMAT_LABELS, LAST_NAME_KEY } from '@/components/report/create/constants';
+import { isDepsReady, getUnreadyDeps } from '@/components/report/create/scriptDeps';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { toast } from 'sonner';
-import { ChevronRight, CheckCircle, Download, Terminal, History, Package, Check, AlertCircle, X as XIcon, RefreshCw } from 'lucide-react';
-import { getApiUrl, fetchWithAuth, getRunningReportId, clearRunningReportId, pollReportLogs, pollReportStatus } from '@/services/api';
-
-type CATEGORY_LABELS = Record<LogCategory, string>;
-const CATEGORY_LABELS: CATEGORY_LABELS = { host: '主机', storage: '存储', database: '数据库', virtualization: '虚拟化', network: '网络' };
-const OUTPUT_FORMAT_LABELS: Record<OutputFormat, string> = { html: 'HTML', md: 'Markdown', docx: 'Word (DOCX)', xlsx: 'Excel', pdf: 'PDF' };
+import { ChevronRight, CheckCircle, AlertCircle, X as XIcon, Sparkles } from 'lucide-react';
+import { getRunningReportId, clearRunningReportId, pollReportLogs, pollReportStatus, apiExtractArchive } from '@/services/api';
 
 export default function ReportCreatePage() {
   const { scripts, fetchScripts } = useScriptStore();
@@ -29,21 +28,19 @@ export default function ReportCreatePage() {
   const { generationState, setGenerationState, resetGenerationState, generateReport } = useReportStore();
   const { user } = useAuthStore();
   const logsEndRef = useRef<HTMLDivElement>(null);
-
-  // AbortController for download requests
-  const downloadAbortRef = useRef<AbortController | null>(null);
+  const [searchParams] = useSearchParams();
 
   // 使用日志持久化 hook
   const [currentSessionId, setCurrentSessionId] = useState<string>(() => {
-    // 从 URL 或 localStorage 恢复会话ID
-    const urlParams = new URLSearchParams(window.location.search);
-    return urlParams.get('sessionId') || localStorage.getItem('current_report_session') || '';
+    // 从 URL 或 localStorage 恢复会话ID（仅挂载时读取一次）
+    return searchParams.get('sessionId') || localStorage.getItem('current_report_session') || '';
   });
 
   const {
     logs: execLogs,
     isRestored,
     addLog,
+    addLogRef,
     clearLogs,
     updateStatus,
     setSessionId,
@@ -52,7 +49,17 @@ export default function ReportCreatePage() {
 
   const lastReportIdRef = useRef<string>('');
   const lastReportRef = useRef<Report | null>(null);
+  const execLogsRef = useRef<string[]>([]); // 保持最新日志引用，避免闭包过时
   const [manualTemplate, setManualTemplate] = useState(false);
+  // AI 智能分析为默认模式；仅 ?mode=script 显式回退到脚本模式（仅挂载时读取一次）
+  const [useAI, setUseAI] = useState(() => searchParams.get('mode') !== 'script');
+
+  // 压缩包解压状态
+  const [extracting, setExtracting] = useState(false);
+  const [extractProgress, setExtractProgress] = useState('');
+  const [passwordDialogOpen, setPasswordDialogOpen] = useState(false);
+  const [passwordTargetFile, setPasswordTargetFile] = useState<{ name: string; file: File } | null>(null);
+  const [passwordError, setPasswordError] = useState('');
 
   // 依赖未就绪警告弹窗
   const [showDepsWarning, setShowDepsWarning] = useState(false);
@@ -63,25 +70,6 @@ export default function ReportCreatePage() {
       localStorage.setItem('current_report_session', currentSessionId);
     }
   }, [currentSessionId]);
-
-  const isDepsStatusDone = (status?: string) => status === 'done' || status === 'success';
-
-  /** 判断脚本依赖是否已就绪 */
-  const isDepsReady = (s: Script): boolean => {
-    if (s.scriptType !== 'python') return true;
-    if (!s.requirements || s.requirements.length === 0) return true;
-    const ds = (s as any).depsStatus as { status?: string; packages?: string[] } | undefined;
-    return isDepsStatusDone(ds?.status);
-  };
-
-  /** 获取脚本未就绪的依赖列表 */
-  const getUnreadyDeps = (s: Script): string[] => {
-    if (!s.requirements) return [];
-    const ds = (s as any).depsStatus as { status?: string; packages?: string[] } | undefined;
-    if (isDepsStatusDone(ds?.status)) return [];
-    // 返回所有配置的依赖（因为它们都未安装/未状态）
-    return s.requirements;
-  };
 
   // 步骤配置：根据是否手动选模板决定步骤2是否可见
   const stepConfig = useMemo(() => {
@@ -112,8 +100,6 @@ export default function ReportCreatePage() {
     const d = new Date();
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   }, []);
-
-  const LAST_NAME_KEY = 'report_last_name';
 
   useEffect(() => { fetchScripts(); fetchDocTemplates(); }, [fetchScripts, fetchDocTemplates]);
 
@@ -178,8 +164,9 @@ export default function ReportCreatePage() {
     return patches;
   }
 
-  // Auto-scroll logs
+  // Auto-scroll logs + 同步 ref
   useEffect(() => {
+    execLogsRef.current = execLogs;
     logsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [execLogs]);
 
@@ -211,10 +198,21 @@ export default function ReportCreatePage() {
           }
           firstFetch = false;
 
-          // 获取最新日志
+          // 获取最新日志（只在首次恢复时替换，后续追加新日志避免覆盖实时推送）
           const freshLogs = await pollReportLogs(reportId);
           if (freshLogs.length > 0) {
-            setLogLines(freshLogs);
+            if (firstFetch) {
+              setLogLines(freshLogs);
+            } else {
+              // 后续轮询：只追加服务端比本地多的新日志
+              const localCount = execLogsRef.current.length;
+              if (freshLogs.length > localCount) {
+                const newOnes = freshLogs.slice(localCount);
+                for (const msg of newOnes) {
+                  addLogRef.current(msg);
+                }
+              }
+            }
           }
 
           // 获取状态
@@ -254,6 +252,131 @@ export default function ReportCreatePage() {
       case 4: return !!generationState.reportInfo.name.trim();
       default: return true;
     }
+  };
+
+  /** 步骤1 → 下一步：脚本关联了模板但未手动选择时，自动选第一个可用的关联模板 */
+  const goNextFromStep1 = () => {
+    if (selectedScript?.templateIds?.length && !generationState.selectedTemplateId) {
+      const validId = selectedScript.templateIds.find((tid) => docTemplates.some((t) => t.id === tid));
+      if (validId) setGenerationState({ selectedTemplateId: validId, step: nextStep() });
+      else setGenerationState({ step: nextStep() });
+    } else {
+      setGenerationState({ step: nextStep() });
+    }
+  };
+
+  /** 步骤1 下一步入口：先检查脚本依赖是否就绪 */
+  const handleStep1Next = () => {
+    if (selectedScript && !isDepsReady(selectedScript)) {
+      setShowDepsWarning(true);
+      return;
+    }
+    goNextFromStep1();
+  };
+
+  /** 步骤2 下一步：未选模板但脚本有关联模板时，自动选第一个可用的关联模板 */
+  const handleStep2Next = () => {
+    if (!generationState.selectedTemplateId && selectedScript?.templateIds.length) {
+      const validId = selectedScript.templateIds.find((tid) => docTemplates.some((t) => t.id === tid));
+      if (validId) setGenerationState({ selectedTemplateId: validId });
+    }
+    setGenerationState({ step: nextStep() });
+  };
+
+  /** 步骤3 下一步：有压缩包时先逐个上传解压，全部成功后进入下一步 */
+  const handleStep3Next = async () => {
+    // 检查是否有压缩包需要解压
+    const archives = generationState.inputFiles.filter(
+      (f) => f.isArchive && /\.(zip|tar|tar\.gz|tgz)$/i.test(f.name)
+    );
+    if (archives.length === 0) {
+      // 没有压缩包，直接下一步
+      fillStep4Defaults();
+      setGenerationState({ step: nextStep() });
+      return;
+    }
+
+    // 有压缩包，逐个上传解压
+    setExtracting(true);
+    setExtractProgress(`正在处理第 1/${archives.length} 个压缩包...`);
+    let allOk = true;
+
+    for (let i = 0; i < archives.length; i++) {
+      const arch = archives[i];
+      setExtractProgress(`正在处理第 ${i + 1}/${archives.length} 个压缩包: ${arch.name}...`);
+
+      try {
+        const result = await apiExtractArchive(arch.file);
+
+        if (result.needPassword) {
+          // 需要密码，打开密码对话框
+          setPasswordTargetFile({ name: arch.name, file: arch.file });
+          setPasswordError('');
+          setPasswordDialogOpen(true);
+          // 等待密码输入（会被 async handler 继续）
+          allOk = false;
+          break;
+        }
+
+        if (!result.success) {
+          toast.error(`${arch.name} 解压失败: ${result.error || '未知错误'}`);
+          allOk = false;
+          break;
+        }
+
+        // 解压成功
+        const fileCount = result.files?.length || 0;
+        toast.success(`${arch.name} 解压完成，共 ${fileCount} 个文件`);
+      } catch (err: any) {
+        toast.error(`${arch.name} 处理失败: ${err.message}`);
+        allOk = false;
+        break;
+      }
+    }
+
+    setExtracting(false);
+    if (allOk) {
+      fillStep4Defaults();
+      setGenerationState({ step: nextStep() });
+    }
+  };
+
+  const handlePasswordConfirm = async (password: string) => {
+    if (!passwordTargetFile) return;
+    setExtracting(true);
+    setPasswordError('');
+    try {
+      const result = await apiExtractArchive(passwordTargetFile.file, password);
+      if (!result.success) {
+        if (result.errorCode === 'WRONG_PASSWORD') {
+          setPasswordError('密码错误，请重试');
+          setExtracting(false);
+          return; // 保持对话框打开
+        }
+        toast.error(`解压失败: ${result.error || '未知错误'}`);
+        setPasswordDialogOpen(false);
+      } else {
+        const fileCount = result.files?.length || 0;
+        toast.success(`解压完成，共 ${fileCount} 个文件`);
+        setPasswordDialogOpen(false);
+        setExtracting(false);
+        fillStep4Defaults();
+        setGenerationState({ step: nextStep() });
+      }
+    } catch (err: any) {
+      setPasswordError(err.message);
+    } finally {
+      setExtracting(false);
+    }
+  };
+
+  const handlePasswordCancel = () => {
+    setPasswordDialogOpen(false);
+    setPasswordTargetFile(null);
+    setExtracting(false);
+    // 用户取消密码，直接继续（跳过压缩包解压）
+    fillStep4Defaults();
+    setGenerationState({ step: nextStep() });
   };
 
   const handleGenerate = async () => {
@@ -304,6 +427,7 @@ export default function ReportCreatePage() {
         templateId: finalTemplateId,
         inputFiles: doneInputFiles.map((f) => f.file),
         inputHashes: doneInputFiles.map((f) => f.hash || ''),
+        dedupIndices: doneInputFiles.map((f, i) => (f.dedup ? i : -1)).filter((i) => i >= 0),
         outputFormat: format,
         requirements: script?.requirements || [],
         reportInfo: {
@@ -313,7 +437,7 @@ export default function ReportCreatePage() {
           category: generationState.logCategory,
         },
       }, (msg) => {
-        addLog(msg);
+        addLogRef.current(msg);
       });
 
       // Use backend's actual status
@@ -342,502 +466,211 @@ export default function ReportCreatePage() {
     }
   };
 
+  /** 页面标题映射表：AI 模式固定标题；脚本模式按步骤映射，未覆盖步骤回退到脚本名 */
+  const PAGE_TITLE_MAP = {
+    ai: 'AI 智能分析',
+    scriptDefault: '生成报告',
+  } as const;
+  const SCRIPT_STEP_TITLE_MAP: Partial<Record<1 | 2 | 3 | 4 | 5, string>> = {
+    1: '选择脚本生成报告文件',
+  };
+  const pageTitle = useAI
+    ? PAGE_TITLE_MAP.ai
+    : SCRIPT_STEP_TITLE_MAP[generationState.step] ?? selectedScript?.name ?? PAGE_TITLE_MAP.scriptDefault;
+
+  /** 步骤5展示用的模板名（手动所选，或脚本自动关联的第一个可用模板） */
+  const resolvedTemplateName = selectedDocTemplate?.name ||
+    (selectedScript?.templateIds?.length ? docTemplates.find(t => selectedScript.templateIds.includes(t.id))?.name : undefined);
+
   // ── Step 1–5 UI ──
   return (
     <div className="space-y-6">
-      <h2 className="text-2xl font-bold tracking-tight">
-        {generationState.step === 1 ? '选择脚本生成报告文件' : selectedScript?.name || '生成报告'}
-      </h2>
-
-      {/* Step indicator */}
-      <div className="flex items-center gap-2 text-sm flex-wrap">
-        {stepConfig.map((s, idx) => (
-          <div key={s.key} className="flex items-center gap-1">
-            <div className={`flex h-7 w-7 items-center justify-center rounded-full text-xs font-medium ${
-              currentStepIndex === idx ? 'bg-primary text-primary-foreground'
-              : currentStepIndex > idx ? 'bg-primary/20 text-primary'
-              : 'bg-muted text-muted-foreground'
-            }`}>
-              {currentStepIndex > idx ? <CheckCircle className="h-4 w-4" /> : idx + 1}
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <h2 className="text-2xl font-bold tracking-tight">{pageTitle}</h2>
+        {/* AI 模式切换 - 突出显示为主要功能 */}
+        {useAI || generationState.step <= 1 ? (
+          <button
+            type="button"
+            onClick={() => { setUseAI(!useAI); if (!useAI) resetGenerationState(); }}
+            className={`flex items-center gap-3 rounded-lg border-2 px-4 py-2 transition-all ${
+              useAI
+                ? 'border-primary bg-primary/10 shadow-sm'
+                : 'border-dashed border-primary/40 hover:border-primary hover:bg-primary/5'
+            }`}
+          >
+            <div className={`flex h-8 w-8 items-center justify-center rounded-md ${useAI ? 'bg-primary text-primary-foreground' : 'bg-primary/10 text-primary'}`}>
+              <Sparkles className="h-4 w-4" />
             </div>
-            <span className={`text-xs ${currentStepIndex >= idx ? 'text-foreground' : 'text-muted-foreground'}`}>
-              {s.label}
-            </span>
-            {idx < stepConfig.length - 1 && <ChevronRight className="h-3 w-3 text-muted-foreground mx-1" />}
-          </div>
-        ))}
+            <div className="text-left">
+              <div className={`text-sm font-semibold ${useAI ? 'text-primary' : 'text-foreground'}`}>
+                {useAI ? 'AI 智能分析模式' : '使用 AI 生成'}
+              </div>
+              <div className="text-xs text-muted-foreground">
+                {useAI ? '点击切换回脚本模式' : 'AI 自动分析巡检日志'}
+              </div>
+            </div>
+            <Switch checked={useAI} onCheckedChange={(v) => { setUseAI(v); if (v) resetGenerationState(); }} />
+          </button>
+        ) : null}
       </div>
 
-      {/* Step 1: Select script */}
-      {generationState.step === 1 && (
-        <Card>
-          <CardHeader>
-            <CardTitle>步骤1：选择脚本</CardTitle>
-            <p className="text-sm text-muted-foreground">请选择用于处理巡检数据的脚本</p>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex items-center gap-2">
-              <Switch checked={manualTemplate} onCheckedChange={setManualTemplate} />
-              <Label className="cursor-pointer text-sm">手动选择模板</Label>
-            </div>
-            <div className="grid grid-cols-1 gap-3">
-              {filteredScripts.length === 0 && (
-                <p className="text-sm text-muted-foreground text-center py-8">暂无脚本，请先在「脚本与模板」页面添加脚本</p>
-              )}
-              {filteredScripts.map((s) => (
-                <div
-                  key={s.id}
-                  onClick={() => setGenerationState({ selectedScriptId: s.id })}
-                  className={`cursor-pointer rounded-lg border p-4 transition-colors ${generationState.selectedScriptId === s.id ? 'border-primary bg-primary/5' : 'hover:bg-accent'}`}
-                >
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <p className="font-medium">{s.name}</p>
-                        {s.scriptType === 'python' && s.requirements && s.requirements.length > 0 && (
-                          isDepsReady(s)
-                            ? <Badge className="text-xs bg-green-100 text-green-700 border-green-300 hover:bg-green-100 pointer-events-none"><Check className="h-3 w-3 mr-0.5" />已就绪</Badge>
-                            : <Badge className="text-xs bg-red-50 text-red-600 border-red-200 hover:bg-red-50 pointer-events-none"><AlertCircle className="h-3 w-3 mr-0.5" />未就绪</Badge>
-                        )}
-                      </div>
-                      <p className="text-xs text-muted-foreground">{s.description || s.fileName} · {formatFileSize(s.fileSize)}</p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Badge variant="secondary">Python</Badge>
-                      <Badge variant="outline">v{s.version}</Badge>
-                    </div>
-                  </div>
+      {useAI ? (
+        // AI 分析模式
+        <AIAnalysisPanel />
+      ) : (
+        <>
+          {/* Step indicator */}
+          <div className="flex items-center gap-2 text-sm flex-wrap">
+            {stepConfig.map((s, idx) => (
+              <div key={s.key} className="flex items-center gap-1">
+                <div className={`flex h-7 w-7 items-center justify-center rounded-full text-xs font-medium ${
+                  currentStepIndex === idx ? 'bg-primary text-primary-foreground'
+                  : currentStepIndex > idx ? 'bg-primary/20 text-primary'
+                  : 'bg-muted text-muted-foreground'
+                }`}>
+                  {currentStepIndex > idx ? <CheckCircle className="h-4 w-4" /> : idx + 1}
                 </div>
-              ))}
-            </div>
-            <div className="flex justify-end">
-              <Button disabled={!canGoNext()} onClick={() => {
-                // 检查依赖是否就绪
-                if (selectedScript && !isDepsReady(selectedScript)) {
-                  setShowDepsWarning(true);
-                  return;
-                }
-                // 脚本关联了模板但未手动选择 → 自动选第一个
-                if (selectedScript?.templateIds?.length && !generationState.selectedTemplateId) {
-                  const validId = selectedScript.templateIds.find((tid) => docTemplates.some((t) => t.id === tid));
-                  if (validId) setGenerationState({ selectedTemplateId: validId, step: nextStep() });
-                  else setGenerationState({ step: nextStep() });
-                } else {
-                  setGenerationState({ step: nextStep() });
-                }
-              }}>
-                下一步 <ChevronRight className="ml-1 h-4 w-4" />
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Step 2: Select template (conditional) */}
-      {generationState.step === 2 && (
-        <Card>
-          <CardHeader><CardTitle>步骤2：选择报告模板</CardTitle></CardHeader>
-          <CardContent className="space-y-4">
-            {selectedScript && selectedScript.templateIds.length > 0 ? (
-              <div className="rounded-lg border p-4 bg-primary/5 border-primary/30">
-                <p className="text-sm font-medium">
-                  当前脚本「{selectedScript.name}」已关联模板，
-                  {selectedDocTemplate ? (
-                    <span>正在使用：<Badge variant="default" className="ml-1">{selectedDocTemplate.name}</Badge></span>
-                  ) : (
-                    <span className="text-muted-foreground">已自动选中关联模板</span>
-                  )}
-                </p>
-                <p className="text-xs text-muted-foreground mt-1">如需更换，可在下方点击其他模板；关联模板不再重复显示</p>
+                <span className={`text-xs ${currentStepIndex >= idx ? 'text-foreground' : 'text-muted-foreground'}`}>
+                  {s.label}
+                </span>
+                {idx < stepConfig.length - 1 && <ChevronRight className="h-3 w-3 text-muted-foreground mx-1" />}
               </div>
-            ) : null}
-            <div className="grid grid-cols-1 gap-3">
-              {(() => {
-                const available = selectedScript && selectedScript.templateIds && selectedScript.templateIds.length > 0
-                  ? docTemplates.filter((t) => !selectedScript!.templateIds.includes(t.id))
-                  : docTemplates;
-                if (available.length === 0) {
-                  return <p className="text-sm text-muted-foreground text-center py-8">暂无其他可选模板</p>;
-                }
-                return available.map((t) => (
-                <div
-                  key={t.id}
-                  onClick={() => setGenerationState({ selectedTemplateId: t.id })}
-                  className={`cursor-pointer rounded-lg border p-4 transition-colors ${generationState.selectedTemplateId === t.id ? 'border-primary bg-primary/5' : 'hover:bg-accent'}`}
-                >
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="font-medium">{t.name}</p>
-                      {t.description && <p className="text-xs text-muted-foreground">{t.description}</p>}
-                    </div>
-                    <Badge variant="outline">{t.fileType.toUpperCase()}</Badge>
-                  </div>
-                </div>
-                ));
-              })()}
-            </div>
-            <div className="flex justify-between">
-              <Button variant="outline" onClick={() => setGenerationState({ step: prevStep() })}>上一步</Button>
-              <Button onClick={() => {
-                if (!generationState.selectedTemplateId && selectedScript?.templateIds.length) {
-                  const validId = selectedScript.templateIds.find((tid) => docTemplates.some((t) => t.id === tid));
-                  if (validId) setGenerationState({ selectedTemplateId: validId });
-                }
-                setGenerationState({ step: nextStep() });
-              }}>
-                下一步 <ChevronRight className="ml-1 h-4 w-4" />
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      )}
+            ))}
+          </div>
 
-      {/* Step 3: Upload data */}
-      {generationState.step === 3 && (
-        <Card>
-          <CardHeader><CardTitle>步骤{manualTemplate ? '3' : '2'}：上传巡检数据文件</CardTitle></CardHeader>
-          <CardContent>
-            <BatchFileUploader
+          {/* Step 1: Select script */}
+          {generationState.step === 1 && (
+            <StepScript
+              scripts={filteredScripts}
+              selectedScriptId={generationState.selectedScriptId}
+              manualTemplate={manualTemplate}
+              onManualTemplateChange={setManualTemplate}
+              onSelectScript={(id) => setGenerationState({ selectedScriptId: id })}
+              canGoNext={canGoNext()}
+              onNext={handleStep1Next}
+            />
+          )}
+
+          {/* Step 2: Select template (conditional) */}
+          {generationState.step === 2 && (
+            <StepTemplate
+              selectedScript={selectedScript}
+              selectedTemplateId={generationState.selectedTemplateId}
+              selectedDocTemplate={selectedDocTemplate}
+              docTemplates={docTemplates}
+              onSelectTemplate={(id) => setGenerationState({ selectedTemplateId: id })}
+              onPrev={() => setGenerationState({ step: prevStep() })}
+              onNext={handleStep2Next}
+            />
+          )}
+
+          {/* Step 3: Upload data */}
+          {generationState.step === 3 && (
+            <StepUpload
+              stepNumber={manualTemplate ? '3' : '2'}
               files={generationState.inputFiles}
               onFilesChange={(files) => setGenerationState({ inputFiles: files })}
               inputFormats={selectedScript?.inputFormats}
-              navButtons={
-                <div className="flex justify-between">
-                  <Button variant="outline" onClick={() => setGenerationState({ step: prevStep() })}>上一步</Button>
-                  <Button disabled={!canGoNext()} onClick={() => { fillStep4Defaults(); setGenerationState({ step: nextStep() }); }}>
-                    下一步 <ChevronRight className="ml-1 h-4 w-4" />
-                  </Button>
-                </div>
-              }
+              extracting={extracting}
+              extractProgress={extractProgress}
+              canGoNext={canGoNext()}
+              onPrev={() => setGenerationState({ step: prevStep() })}
+              onNext={handleStep3Next}
+              passwordDialogOpen={passwordDialogOpen}
+              passwordFileName={passwordTargetFile?.name || ''}
+              passwordError={passwordError}
+              onPasswordConfirm={handlePasswordConfirm}
+              onPasswordCancel={handlePasswordCancel}
             />
-          </CardContent>
-        </Card>
-      )}
+          )}
 
-      {/* Step 4: Report info */}
-      {generationState.step === 4 && (
-        <Card>
-          <CardHeader><CardTitle>步骤4：填写报告信息</CardTitle></CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <Label>报告名称</Label>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-6 text-xs text-muted-foreground"
-                    onClick={() => {
-                      const last = localStorage.getItem(LAST_NAME_KEY);
-                      if (last) {
-                        setGenerationState({ reportInfo: { ...generationState.reportInfo, name: last } });
-                      }
-                    }}
-                  >
-                    <History className="mr-1 h-3 w-3" />使用上次填写
-                  </Button>
-                </div>
-                <Input value={generationState.reportInfo.name} onChange={(e) => setGenerationState({ reportInfo: { ...generationState.reportInfo, name: e.target.value } })} placeholder="如：2026年6月主机巡检报告" />
-              </div>
-              <div className="space-y-2">
-                <Label>报告日期</Label>
-                <Input type="date" value={generationState.reportInfo.date} onChange={(e) => setGenerationState({ reportInfo: { ...generationState.reportInfo, date: e.target.value } })} />
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>报告作者</Label>
-                <Input value={generationState.reportInfo.author} onChange={(e) => setGenerationState({ reportInfo: { ...generationState.reportInfo, author: e.target.value } })} placeholder="请输入作者" />
-              </div>
-              <div className="space-y-2">
-                <Label>输出格式</Label>
-                <Select value={generationState.outputFormat} onValueChange={(v) => setGenerationState({ outputFormat: v as OutputFormat })}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>{Object.entries(OUTPUT_FORMAT_LABELS).map(([k, v]) => (<SelectItem key={k} value={k}>{v}</SelectItem>))}</SelectContent>
-                </Select>
-              </div>
-            </div>
-            <div className="space-y-2">
-              <Label>日志分类</Label>
-              <Select value={generationState.logCategory} onValueChange={(v) => setGenerationState({ logCategory: v as LogCategory })}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>{Object.entries(CATEGORY_LABELS).map(([k, v]) => (<SelectItem key={k} value={k}>{v}</SelectItem>))}</SelectContent>
-              </Select>
-            </div>
-            <div className="flex justify-between">
-              <Button variant="outline" onClick={() => setGenerationState({ step: prevStep() })}>上一步</Button>
-              <Button disabled={!canGoNext()} onClick={() => setGenerationState({ step: nextStep() })}>
-                下一步 <ChevronRight className="ml-1 h-4 w-4" />
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      )}
+          {/* Step 4: Report info */}
+          {generationState.step === 4 && (
+            <StepInfo
+              reportInfo={generationState.reportInfo}
+              outputFormat={generationState.outputFormat}
+              logCategory={generationState.logCategory}
+              onUpdate={setGenerationState}
+              canGoNext={canGoNext()}
+              onPrev={() => setGenerationState({ step: prevStep() })}
+              onNext={() => setGenerationState({ step: nextStep() })}
+            />
+          )}
 
-      {/* Step 5: Confirm & generate */}
-      {generationState.step === 5 && generationState.status !== 'generating' && generationState.status !== 'success' && generationState.status !== 'failed' && (
-        <Card>
-          <CardHeader><CardTitle>步骤5：确认并生成报告</CardTitle></CardHeader>
-          <CardContent className="space-y-4">
-            <div className="rounded-lg border p-4 space-y-2 text-sm">
-              <div className="flex justify-between"><span className="text-muted-foreground">报告名称：</span><span>{generationState.reportInfo.name}</span></div>
-              <div className="flex justify-between"><span className="text-muted-foreground">报告日期：</span><span>{generationState.reportInfo.date}</span></div>
-              <div className="flex justify-between"><span className="text-muted-foreground">报告作者：</span><span>{generationState.reportInfo.author}</span></div>
-              <div className="flex justify-between"><span className="text-muted-foreground">日志分类：</span>
-                <Badge variant="outline">{CATEGORY_LABELS[generationState.logCategory]}</Badge>
-              </div>
-              <div className="flex justify-between"><span className="text-muted-foreground">巡检文件：</span><span>{doneInputFiles.length} 个文件</span></div>
-              <div className="flex justify-between"><span className="text-muted-foreground">处理脚本：</span><span>{selectedScript?.name || '-'}</span></div>
-              <div className="flex justify-between"><span className="text-muted-foreground">报告模板：</span><span>{
-                selectedDocTemplate?.name ||
-                (selectedScript?.templateIds?.length ? docTemplates.find(t => selectedScript.templateIds.includes(t.id))?.name : null) ||
-                '-'
-              }</span></div>
-              <div className="flex justify-between"><span className="text-muted-foreground">输出格式：</span><span>{OUTPUT_FORMAT_LABELS[generationState.outputFormat]}</span></div>
-            </div>
-            <div className="flex justify-between">
-              <Button variant="outline" onClick={() => setGenerationState({ step: prevStep() })}>上一步</Button>
-              <Button onClick={handleGenerate}>开始生成报告</Button>
-            </div>
-          </CardContent>
-        </Card>
-      )}
+          {/* Step 5: Confirm & generate */}
+          {generationState.step === 5 && generationState.status !== 'generating' && generationState.status !== 'success' && generationState.status !== 'failed' && (
+            <StepConfirm
+              reportInfo={generationState.reportInfo}
+              logCategory={generationState.logCategory}
+              doneFilesCount={doneInputFiles.length}
+              scriptName={selectedScript?.name}
+              templateName={resolvedTemplateName}
+              outputFormat={generationState.outputFormat}
+              onPrev={() => setGenerationState({ step: prevStep() })}
+              onGenerate={handleGenerate}
+            />
+          )}
 
-      {/* Generating / Result */}
-      {(generationState.status === 'generating' || generationState.status === 'success' || generationState.status === 'failed') && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Terminal className="h-5 w-5" />
-              {generationState.status === 'generating' ? '正在生成报告...' :
-               generationState.status === 'success' ? '报告生成成功' : '报告生成失败'}
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {/* Log panel header */}
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                {isRestored && (
-                  <Badge variant="outline" className="text-xs bg-blue-50 text-blue-600 border-blue-200">
-                    <RefreshCw className="h-3 w-3 mr-1" />
-                    已恢复历史日志
-                  </Badge>
-                )}
-                <span className="text-xs text-muted-foreground">
-                  共 {execLogs.length} 条日志
-                </span>
-              </div>
-              {execLogs.length > 0 && generationState.status !== 'generating' && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 text-xs"
-                  onClick={() => {
-                    clearLogs();
-                    toast.success('日志已清空');
-                  }}
-                >
-                  清空日志
-                </Button>
-              )}
-            </div>
+          {/* Generating / Result */}
+          {(generationState.status === 'generating' || generationState.status === 'success' || generationState.status === 'failed') && (
+            <GeneratingResultCard
+              status={generationState.status}
+              logs={execLogs}
+              isRestored={isRestored}
+              logsEndRef={logsEndRef}
+              onClearLogs={clearLogs}
+              report={lastReportRef.current}
+              reportId={lastReportIdRef.current}
+              onReset={() => {
+                resetGenerationState();
+                clearLogs();
+                setCurrentSessionId('');
+                localStorage.removeItem('current_report_session');
+              }}
+              onBackToEdit={() => {
+                setGenerationState({ step: 5, status: 'idle' });
+                clearLogs();
+              }}
+              onRetry={handleGenerate}
+            />
+          )}
 
-            {/* Log panel */}
-            <div className="rounded-lg bg-gray-950 p-4 max-h-80 overflow-y-auto font-mono text-xs">
-              {execLogs.length === 0 ? (
-                <p className="text-gray-500">等待执行...</p>
-              ) : (
-                execLogs.map((line, i) => (
-                  <div key={i} className={`leading-relaxed ${line.includes('[ERR]') ? 'text-red-400' : line.includes('[OUT]') ? 'text-green-400' : line.includes('[判断]') ? 'text-yellow-400' : line.includes('[结果]') ? 'text-cyan-400' : 'text-gray-300'}`}>
-                    {line}
-                  </div>
-                ))
-              )}
-              <div ref={logsEndRef} />
-            </div>
-
-            {/* 查看生成的文件 (on success) */}
-            {generationState.status === 'success' && (() => {
-              const report = lastReportRef.current;
-              const filePaths = report?.filePaths || [];
-              const reportId = lastReportIdRef.current;
-
-              const handleDownload = async (fileIndex: number) => {
-                if (!reportId) {
-                  toast.error('报告ID为空');
-                  return;
-                }
-                const url = getApiUrl(`/reports/${reportId}/download?fileIndex=${fileIndex}`);
-                try {
-                  const res = await fetchWithAuth(url);
-                  if (!res.ok) {
-                    const errData = await res.json().catch(() => ({}));
-                    toast.error(errData.error || errData.message || `下载失败 (${res.status})`);
-                    return;
-                  }
-                  const blob = await res.blob();
-                  const objUrl = URL.createObjectURL(blob);
-                  const a = document.createElement('a');
-                  a.href = objUrl;
-                  const cd = res.headers.get('Content-Disposition');
-                  const match = cd?.match(/filename="?([^"]+)"?/);
-                  a.download = match ? decodeURIComponent(match[1]) : (filePaths[fileIndex]?.split(/[/\\]/).pop() || `report`);
-                  document.body.appendChild(a);
-                  a.click();
-                  document.body.removeChild(a);
-                  setTimeout(() => URL.revokeObjectURL(objUrl), 2000);
-                } catch (err: any) {
-                  toast.error(`下载失败: ${err.message || '网络错误'}`);
-                }
-              };
-
-              const handleDownloadAll = () => {
-                for (let i = 0; i < filePaths.length; i++) {
-                  // 逐个触发下载（浏览器会分别处理）
-                  setTimeout(() => handleDownload(i), i * 300);
-                }
-              };
-
-              const handleDownloadPackage = async () => {
-                const currentReportId = reportId;
-                if (!currentReportId) {
-                  toast.error('报告ID为空，请重新生成报告');
-                  return;
-                }
-                const url = getApiUrl(`/reports/${currentReportId}/download-all`);
-                try {
-                  const res = await fetchWithAuth(url);
-                  if (!res.ok) {
-                    const errData = await res.json().catch(() => ({}));
-                    try { toast.error(errData.error || errData.message || `打包下载失败 (${res.status})`); } catch (e) { console.error('[打包下载] toast.error failed:', e); }
-                    return;
-                  }
-                  const blob = await res.blob();
-                  const objUrl = URL.createObjectURL(blob);
-                  const a = document.createElement('a');
-                  a.href = objUrl;
-                  const cd = res.headers.get('Content-Disposition');
-                  const match = cd?.match(/filename="?([^"]+)"?/);
-                  a.download = match ? decodeURIComponent(match[1]) : `${report?.name || '报告'}_全部文件.tar.gz`;
-                  document.body.appendChild(a);
-                  a.click();
-                  document.body.removeChild(a);
-                  // 延迟释放 blob URL，给浏览器足够时间启动异步下载
-                  setTimeout(() => URL.revokeObjectURL(objUrl), 2000);
-                } catch (err: any) {
-                  try { toast.error(`打包下载失败: ${err.message || '网络错误'}`); } catch (e) { console.error('[打包下载] toast.error failed:', e); }
-                  console.error('[打包下载] 捕获异常:', err);
-                }
-              };
-
-              return (
-              <div className="space-y-3 pt-2">
-                <div className="flex gap-2 justify-center flex-wrap">
-                  <Button variant="outline" onClick={() => {
-                    resetGenerationState();
-                    clearLogs();
-                    setCurrentSessionId('');
-                    localStorage.removeItem('current_report_session');
-                  }}>
-                    生成新报告
-                  </Button>
-                  {filePaths.length > 1 && (
-                    <>
-                      <Button size="sm" onClick={handleDownloadAll}>
-                        <Download className="mr-1 h-3 w-3" />一键下载全部 ({filePaths.length})
-                      </Button>
-                      <Button size="sm" variant="secondary" onClick={handleDownloadPackage}>
-                        <Package className="mr-1 h-3 w-3" />打包下载 (.tar.gz)
-                      </Button>
-                    </>
-                  )}
-                </div>
-                {filePaths.length === 0 ? (
-                  <p className="text-sm text-muted-foreground text-center py-2">报告已生成，可在「报告管理」页面查看和下载</p>
-                ) : (
-                  <>
-                    <p className="text-sm text-muted-foreground text-center">
-                      脚本生成了 {filePaths.length} 个报告文件：
-                    </p>
-                    <div className="space-y-2 max-h-48 overflow-y-auto border rounded-lg p-2">
-                      {filePaths.map((fp, idx) => {
-                        const fileName = fp.split(/[/\\]/).pop() || `file_${idx + 1}`;
-                        return (
-                          <div key={idx} className="flex items-center justify-between rounded border p-2">
-                            <span className="text-sm truncate mr-2 flex-1" title={fileName}>{fileName}</span>
-                            <Button size="sm" variant="outline" onClick={() => handleDownload(idx)}>
-                              <Download className="mr-1 h-3 w-3" />下载
-                            </Button>
-                          </div>
-                        );
-                      })}
+          {/* ═════ 依赖未就绪警告弹窗 ═════ */}
+          <Dialog open={showDepsWarning} onOpenChange={setShowDepsWarning}>
+            <DialogContent className="max-w-md">
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2 text-yellow-600">
+                  <AlertCircle className="h-5 w-5" />依赖未就绪
+                </DialogTitle>
+                <DialogDescription>
+                  当前脚本「{selectedScript?.name}」的 Python 依赖尚未安装完成，直接生成报告可能会失败。
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-3">
+                <p className="text-sm font-medium">以下依赖未就绪：</p>
+                <div className="max-h-40 overflow-y-auto border rounded-lg p-3 bg-muted/30">
+                  {selectedScript && getUnreadyDeps(selectedScript).map((dep, i) => (
+                    <div key={i} className="flex items-center gap-2 text-sm py-1">
+                      <XIcon className="h-3.5 w-3.5 text-red-500 shrink-0" />
+                      <span className="font-mono text-xs">{dep}</span>
                     </div>
-                  </>
-                )}
-              </div>
-              );
-            })()}
-
-            {generationState.status === 'failed' && (
-              <div className="flex gap-3 justify-center pt-2">
-                <Button variant="outline" onClick={() => {
-                  setGenerationState({ step: 5, status: 'idle' });
-                  clearLogs();
-                }}>
-                  返回修改
-                </Button>
-                <Button onClick={() => {
-                  handleGenerate();
-                }}>
-                  重新生成
-                </Button>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      )}
-
-      {/* ═════ 依赖未就绪警告弹窗 ═════ */}
-      <Dialog open={showDepsWarning} onOpenChange={setShowDepsWarning}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-yellow-600">
-              <AlertCircle className="h-5 w-5" />依赖未就绪
-            </DialogTitle>
-            <DialogDescription>
-              当前脚本「{selectedScript?.name}」的 Python 依赖尚未安装完成，直接生成报告可能会失败。
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-3">
-            <p className="text-sm font-medium">以下依赖未就绪：</p>
-            <div className="max-h-40 overflow-y-auto border rounded-lg p-3 bg-muted/30">
-              {selectedScript && getUnreadyDeps(selectedScript).map((dep, i) => (
-                <div key={i} className="flex items-center gap-2 text-sm py-1">
-                  <XIcon className="h-3.5 w-3.5 text-red-500 shrink-0" />
-                  <span className="font-mono text-xs">{dep}</span>
+                  ))}
                 </div>
-              ))}
-            </div>
-            <p className="text-xs text-muted-foreground">建议先到「脚本及模板管理」页面安装依赖后再生成报告。</p>
-          </div>
-          <DialogFooter className="gap-2">
-            <Button variant="outline" onClick={() => setShowDepsWarning(false)}>取消</Button>
-            <Button variant="destructive" onClick={() => {
-              setShowDepsWarning(false);
-              // 继续下一步
-              if (selectedScript?.templateIds?.length && !generationState.selectedTemplateId) {
-                const validId = selectedScript.templateIds.find((tid) => docTemplates.some((t) => t.id === tid));
-                if (validId) setGenerationState({ selectedTemplateId: validId, step: nextStep() });
-                else setGenerationState({ step: nextStep() });
-              } else {
-                setGenerationState({ step: nextStep() });
-              }
-            }}>
-              <AlertCircle className="h-4 w-4 mr-1" />我已了解，继续
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+                <p className="text-xs text-muted-foreground">建议先到「脚本及模板管理」页面安装依赖后再生成报告。</p>
+              </div>
+              <DialogFooter className="gap-2">
+                <Button variant="outline" onClick={() => setShowDepsWarning(false)}>取消</Button>
+                <Button variant="destructive" onClick={() => {
+                  setShowDepsWarning(false);
+                  goNextFromStep1();
+                }}>
+                  <AlertCircle className="h-4 w-4 mr-1" />我已了解，继续
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        </>
+        )}
     </div>
   );
 }

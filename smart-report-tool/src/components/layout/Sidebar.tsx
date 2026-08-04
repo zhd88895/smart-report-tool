@@ -1,22 +1,59 @@
 import { useNavigate, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard, FileText, ClipboardList, Download, Bot,
-  Users, Settings, ChevronLeft, ChevronRight,
+  Users, Settings, SlidersHorizontal, ChevronLeft, ChevronRight,
+  Database, Sparkles, MessageSquare,
 } from 'lucide-react';
 import { useAuthStore } from '@/stores/authStore';
 import { useUIStore } from '@/stores/uiStore';
-import { ROUTES } from '@/constants/routes';
+import { ROUTES, ROUTE_LABELS } from '@/constants/routes';
+import { SIDEBAR_WIDTH_COLLAPSED, SIDEBAR_WIDTH_EXPANDED } from '@/constants/layout';
 import { canAccess } from '@/utils/permissions';
 import { cn } from '@/lib/utils';
+import { AplLogo } from '@/components/common/AplLogo';
+import type { LucideIcon } from 'lucide-react';
+import type { FeatureKey } from '@/types';
 
-const menuItems = [
-  { icon: LayoutDashboard, label: '仪表盘', path: ROUTES.DASHBOARD, feature: 'dashboard' as const },
-  { icon: FileText, label: '脚本及模板', path: ROUTES.SCRIPTS, feature: 'scripts' as const },
-  { icon: ClipboardList, label: '生成报告', path: ROUTES.REPORT_CREATE, feature: 'reportCreate' as const },
-  { icon: Download, label: '报告管理', path: ROUTES.REPORTS, feature: 'reports' as const },
-  { icon: Bot, label: 'AI助手', path: ROUTES.ASSISTANT, feature: 'assistant' as const },
-  { icon: Users, label: '用户管理', path: ROUTES.USERS, feature: 'users' as const },
-  { icon: Settings, label: '个人设置', path: ROUTES.SETTINGS, feature: 'settings' as const },
+interface MenuItem {
+  icon: LucideIcon;
+  path: string;
+  feature: FeatureKey;
+  indent?: boolean;
+}
+
+interface MenuGroup {
+  title: string;
+  items: MenuItem[];
+}
+
+/** 分组与顺序定义于此，label 统一引用 ROUTE_LABELS 单一来源 */
+const menuGroups: MenuGroup[] = [
+  {
+    title: 'AI 工作区',
+    items: [
+      { icon: Bot, path: ROUTES.ASSISTANT, feature: 'assistant' },
+      { icon: ClipboardList, path: ROUTES.REPORT_CREATE, feature: 'reportCreate' },
+      { icon: MessageSquare, path: ROUTES.CONVERSATIONS, feature: 'conversations' },
+      { icon: Database, path: ROUTES.KNOWLEDGE_BASE, feature: 'settings' },
+    ],
+  },
+  {
+    title: '脚本与数据',
+    items: [
+      { icon: FileText, path: ROUTES.SCRIPTS, feature: 'scripts' },
+      { icon: Download, path: ROUTES.REPORTS, feature: 'reports' },
+      { icon: LayoutDashboard, path: ROUTES.DASHBOARD, feature: 'dashboard' },
+    ],
+  },
+  {
+    title: '系统',
+    items: [
+      { icon: Users, path: ROUTES.USERS, feature: 'users' },
+      { icon: SlidersHorizontal, path: ROUTES.SYSTEM_SETTINGS, feature: 'systemSettings' },
+      { icon: Sparkles, path: ROUTES.AI_SETTINGS, feature: 'ai-settings', indent: true },
+      { icon: Settings, path: ROUTES.SETTINGS, feature: 'settings' },
+    ],
+  },
 ];
 
 export function Sidebar() {
@@ -25,49 +62,63 @@ export function Sidebar() {
   const { user } = useAuthStore();
   const { sidebarCollapsed, toggleSidebar } = useUIStore();
 
-  const visibleItems = menuItems.filter((item) => canAccess(user?.role, item.feature));
+  const visibleGroups = menuGroups
+    .map((group) => ({
+      ...group,
+      items: group.items.filter((item) => canAccess(user?.role, item.feature)),
+    }))
+    .filter((group) => group.items.length > 0);
 
   return (
     <aside
-      className={cn(
-        'fixed left-0 top-0 z-50 h-screen border-r bg-card flex flex-col transition-all duration-300',
-        sidebarCollapsed ? 'w-16' : 'w-60'
-      )}
+      className="fixed left-0 top-0 z-50 h-screen border-r border-sidebar-border bg-sidebar text-sidebar-foreground flex flex-col transition-all duration-300"
+      style={{ width: sidebarCollapsed ? SIDEBAR_WIDTH_COLLAPSED : SIDEBAR_WIDTH_EXPANDED }}
     >
-      <div className="flex h-16 items-center justify-between border-b px-4">
-        {!sidebarCollapsed && (
-          <span className="font-bold text-primary" style={{ fontSize: '1.4rem', letterSpacing: '0.05em' }}>
-              <span style={{ color: '#2563eb' }}>A</span>
-              <span style={{ color: '#dc2626' }}>P</span>
-              <span style={{ color: '#16a34a' }}>L</span>
-            </span>
-        )}
+      <div className="flex h-16 items-center justify-between border-b border-sidebar-border px-4">
+        {!sidebarCollapsed && <AplLogo dark />}
         <button
           onClick={toggleSidebar}
-          className="rounded-md p-1 hover:bg-accent"
+          className="rounded-md p-1 hover:bg-sidebar-accent"
+          aria-label={sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'}
+          title={sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'}
         >
           {sidebarCollapsed ? <ChevronRight className="h-5 w-5" /> : <ChevronLeft className="h-5 w-5" />}
         </button>
       </div>
-      <nav className="flex-1 space-y-1 p-2 overflow-y-auto">
-        {visibleItems.map((item) => {
-          const isActive = location.pathname === item.path;
-          return (
-            <button
-              key={item.path}
-              onClick={() => navigate(item.path)}
-              className={cn(
-                'flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium transition-colors',
-                isActive
-                  ? 'bg-primary text-primary-foreground'
-                  : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
-              )}
-            >
-              <item.icon className="h-5 w-5 shrink-0" />
-              {!sidebarCollapsed && <span>{item.label}</span>}
-            </button>
-          );
-        })}
+      <nav className="flex-1 space-y-4 p-2 overflow-y-auto">
+        {visibleGroups.map((group) => (
+          <div key={group.title}>
+            {!sidebarCollapsed && (
+              <div className="px-3 pb-1 text-xs uppercase tracking-wider text-sidebar-muted">
+                {group.title}
+              </div>
+            )}
+            <div className="space-y-1">
+              {group.items.map((item) => {
+                const isActive = location.pathname === item.path;
+                const label = ROUTE_LABELS[item.path];
+                return (
+                  <button
+                    key={item.path}
+                    onClick={() => navigate(item.path)}
+                    aria-label={label}
+                    title={label}
+                    className={cn(
+                      'flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium transition-colors',
+                      item.indent && !sidebarCollapsed && 'pl-6',
+                      isActive
+                        ? 'bg-sidebar-accent text-sidebar-foreground'
+                        : 'text-sidebar-foreground/75 hover:bg-sidebar-accent hover:text-sidebar-foreground'
+                    )}
+                  >
+                    <item.icon className={cn('shrink-0', item.indent ? 'h-4 w-4' : 'h-5 w-5')} />
+                    {!sidebarCollapsed && <span>{label}</span>}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ))}
       </nav>
     </aside>
   );

@@ -13,6 +13,9 @@ import AssistantPage from '@/pages/AssistantPage';
 import UsersPage from '@/pages/UsersPage';
 import ConversationsPage from '@/pages/ConversationsPage';
 import SettingsPage from '@/pages/SettingsPage';
+import SystemSettingsPage from '@/pages/SystemSettingsPage';
+import AISettingsPage from '@/pages/AISettingsPage';
+import KnowledgeBasePage from '@/pages/KnowledgeBasePage';
 
 export function AppRouter() {
   return (
@@ -28,6 +31,9 @@ export function AppRouter() {
         <Route path={ROUTES.USERS} element={<RouteGuard requiredFeature="users"><UsersPage /></RouteGuard>} />
         <Route path={ROUTES.CONVERSATIONS} element={<RouteGuard requiredFeature="conversations"><ConversationsPage /></RouteGuard>} />
         <Route path={ROUTES.SETTINGS} element={<RouteGuard requiredFeature="settings"><SettingsPage /></RouteGuard>} />
+        <Route path={ROUTES.SYSTEM_SETTINGS} element={<RouteGuard requiredFeature="systemSettings"><SystemSettingsPage /></RouteGuard>} />
+        <Route path={ROUTES.AI_SETTINGS} element={<RouteGuard requiredFeature="ai-settings"><AISettingsPage /></RouteGuard>} />
+        <Route path={ROUTES.KNOWLEDGE_BASE} element={<RouteGuard requiredFeature="settings"><KnowledgeBasePage /></RouteGuard>} />
         <Route path="*" element={<Navigate to={ROUTES.DASHBOARD} replace />} />
       </Route>
     </Routes>

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Save, Shield, Loader2, Lock, Trash2, AlertTriangle } from 'lucide-react';
+import { Save, Shield, Lock, Trash2, AlertTriangle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -7,6 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useAuthStore } from '@/stores/authStore';
+import { LoadingSpinner } from '@/components/common/LoadingSpinner';
 import { useUserStore } from '@/stores/userStore';
 import { ROLE_LABELS, STATUS_LABELS, STATUS_COLORS } from '@/constants/roles';
 import { ScriptRegion, User } from '@/types';
@@ -136,7 +137,7 @@ export default function SettingsPage() {
             </div>
           )}
           <Button onClick={handleSave} disabled={saving}>
-            {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+            {saving ? <LoadingSpinner className="inline-flex py-0 mr-2" /> : <Save className="mr-2 h-4 w-4" />}
             {saving ? '保存中...' : '保存设置'}
           </Button>
         </CardContent>
@@ -152,7 +153,7 @@ export default function SettingsPage() {
           <div className="space-y-2"><Label>新密码</Label><Input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder="至少6位" /></div>
           <div className="space-y-2"><Label>确认新密码</Label><Input type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} /></div>
           <Button onClick={handleChangePassword} disabled={changingPwd}>
-            {changingPwd ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Lock className="mr-2 h-4 w-4" />}
+            {changingPwd ? <LoadingSpinner className="inline-flex py-0 mr-2" /> : <Lock className="mr-2 h-4 w-4" />}
             {changingPwd ? '修改中...' : '修改密码'}
           </Button>
         </CardContent>
@@ -192,7 +193,7 @@ export default function SettingsPage() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowDeleteDialog(false)}>取消</Button>
             <Button variant="destructive" onClick={handleDeleteAccount} disabled={deleting}>
-              {deleting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              {deleting ? <LoadingSpinner className="inline-flex py-0 mr-2" /> : null}
               确认删除
             </Button>
           </DialogFooter>

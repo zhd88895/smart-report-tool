@@ -4,32 +4,52 @@
 
 @layer base {
   :root {
-    --background: 210 40% 98%;
-    --foreground: 222 47% 11%;
+    --background: 210 20% 98%;
+    --foreground: 222 25% 16%;
     --card: 0 0% 100%;
-    --card-foreground: 222 47% 11%;
+    --card-foreground: 222 25% 16%;
     --popover: 0 0% 100%;
-    --popover-foreground: 222 47% 11%;
-    --primary: 221 83% 53%;
-    --primary-foreground: 210 40% 98%;
-    --secondary: 210 40% 96%;
-    --secondary-foreground: 222 47% 11%;
-    --muted: 210 40% 96%;
-    --muted-foreground: 215 16% 47%;
-    --accent: 210 40% 96%;
-    --accent-foreground: 222 47% 11%;
-    --destructive: 0 84% 60%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 214 32% 91%;
-    --input: 214 32% 91%;
-    --ring: 221 83% 53%;
+    --popover-foreground: 222 25% 16%;
+    --primary: 215 55% 32%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 210 16% 95%;
+    --secondary-foreground: 222 25% 16%;
+    --muted: 210 16% 95%;
+    --muted-foreground: 215 14% 42%;
+    --accent: 210 24% 93%;
+    --accent-foreground: 222 25% 16%;
+    --destructive: 0 62% 45%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 214 20% 88%;
+    --input: 214 20% 88%;
+    --ring: 215 55% 32%;
     --radius: 0.5rem;
+    --sidebar: 217 45% 18%;
+    --sidebar-foreground: 210 25% 92%;
+    --sidebar-muted: 215 18% 62%;
+    --sidebar-accent: 216 38% 26%;
+    --sidebar-border: 216 35% 24%;
+    /* 脚本类型语义色（ScriptFileCard 等按脚本类型着色使用） */
+    --script-python-bg: 218 92% 95%;
+    --script-python-fg: 215 79% 46%;
+    --script-bat-bg: 271 84% 95%;
+    --script-bat-fg: 282 68% 38%;
+    --script-ps-bg: 125 39% 94%;
+    --script-ps-fg: 123 46% 34%;
+    --script-sh-bg: 37 100% 94%;
+    --script-sh-fg: 21 100% 45%;
+    --script-default-bg: 0 0% 96%;
+    --script-default-fg: 0 0% 20%;
   }
 }
 
 @layer base {
   * {
     @apply border-border;
+  }
+  html {
+    /* 全站根字号 16px → 17px，统一放大字体/按钮/间距（基于 rem 的布局整体等比放大） */
+    font-size: 17px;
   }
   body {
     @apply bg-background text-foreground;

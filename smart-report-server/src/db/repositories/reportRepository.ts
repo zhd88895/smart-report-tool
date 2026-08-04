@@ -8,8 +8,11 @@
 
 import { getAsync, allAsync, runAsync } from '../database';
 import type { Report } from '../../services/reportService';
+import { toAbsolutePath, toRelativePath } from '../../config';
+import { safeJsonParse } from '../../utils/json';
 
 function rowToReport(row: any): Report {
+  const filePaths: string[] = safeJsonParse<string[]>(row.file_paths, []);
   return {
     id: row.id,
     name: row.name,
@@ -19,29 +22,21 @@ function rowToReport(row: any): Report {
     templateId: row.template_id,
     templateName: row.template_name,
     outputFormat: row.output_format || '',
-    workspaceDir: row.workspace_dir,
+    workspaceDir: toAbsolutePath(row.workspace_dir),
     generatedAt: row.generated_at,
     generatedBy: row.generated_by || 'unknown',
     status: row.status,
     error: row.error,
     logs: safeJsonParse<string[]>(row.logs, []),
-    filePaths: safeJsonParse<string[]>(row.file_paths, []),
-    // 前端兼容字段
+    // filePaths 是 workspace 内相对路径，不是 DATA_DIR 相对路径，保持原样
+    filePaths,
     type: row.type || row.category || '',
     region: row.region || '',
     date: row.date || row.generated_at,
     author: row.author || row.generated_by || 'unknown',
     createdAt: row.created_at || row.generated_at,
+    reportSource: row.report_source || 'script',
   };
-}
-
-function safeJsonParse<T>(value: string | null | undefined, defaultValue: T): T {
-  if (!value) return defaultValue;
-  try {
-    return JSON.parse(value) as T;
-  } catch {
-    return defaultValue;
-  }
 }
 
 function reportToRow(report: Report): any[] {
@@ -54,23 +49,25 @@ function reportToRow(report: Report): any[] {
     report.templateId || null,
     report.templateName || null,
     report.outputFormat || '',
-    report.workspaceDir,
+    toRelativePath(report.workspaceDir),
     report.generatedAt,
     report.generatedBy || 'unknown',
     report.status,
     report.error || null,
     JSON.stringify(report.logs || []),
+    // filePaths 是 workspace 内相对路径，直接存储不转换
     JSON.stringify(report.filePaths || []),
-    report.type || null,      // NEW
-    report.region || null,    // NEW
-    report.date || null,      // NEW
-    report.author || null,    // NEW
-    report.createdAt || null, // NEW
+    report.type || null,
+    report.region || null,
+    report.date || null,
+    report.author || null,
+    report.createdAt || null,
+    report.reportSource || 'script',
   ];
 }
 
 export const reportRepository = {
-  async findAll(filter?: { status?: string; generatedBy?: string }): Promise<Report[]> {
+  async findAll(filter?: { status?: string; generatedBy?: string; reportSource?: string }): Promise<Report[]> {
     const conditions: string[] = [];
     const params: any[] = [];
 
@@ -81,6 +78,10 @@ export const reportRepository = {
     if (filter?.generatedBy) {
       conditions.push('generated_by = ?');
       params.push(filter.generatedBy);
+    }
+    if (filter?.reportSource) {
+      conditions.push('report_source = ?');
+      params.push(filter.reportSource);
     }
 
     const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
@@ -97,8 +98,8 @@ export const reportRepository = {
     await runAsync(
       `INSERT INTO reports (id, name, description, script_id, script_name, template_id, template_name,
         output_format, workspace_dir, generated_at, generated_by, status, error, logs, file_paths,
-        type, region, date, author, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        type, region, date, author, created_at, report_source)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       reportToRow(report)
     );
     return report;
@@ -126,7 +127,6 @@ export const reportRepository = {
     logs: string[];
     filePaths: string[];
     error?: string;
-    /** 补充字段（初始创建时可能不完整，最终更新时补齐） */
     type?: string;
     region?: string;
     date?: string;
@@ -141,6 +141,7 @@ export const reportRepository = {
       [
         data.status,
         JSON.stringify(data.logs),
+        // filePaths 是 workspace 内相对路径，直接存储不转换
         JSON.stringify(data.filePaths),
         data.error || null,
         data.type || null,
@@ -151,6 +152,14 @@ export const reportRepository = {
         id,
       ]
     );
+  },
+
+  /** 仅更新报告文件路径（失败恢复流程使用） */
+  async updateFilePaths(id: string, filePaths: string[]): Promise<void> {
+    await runAsync('UPDATE reports SET file_paths = ? WHERE id = ?', [
+      JSON.stringify(filePaths),
+      id,
+    ]);
   },
 
   async delete(id: string): Promise<void> {

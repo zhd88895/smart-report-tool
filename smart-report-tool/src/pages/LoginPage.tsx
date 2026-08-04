@@ -1,12 +1,13 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { LogIn, Shield } from 'lucide-react';
+import { LogIn } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useAuthStore } from '@/stores/authStore';
+import { AplLogo } from '@/components/common/AplLogo';
 import { ROUTES } from '@/constants/routes';
 import { toast } from 'sonner';
 
@@ -36,7 +37,7 @@ export default function LoginPage() {
       <Card className="w-full max-w-md">
         <CardHeader className="space-y-1 text-center">
           <div className="flex justify-center mb-4">
-            <Shield className="h-12 w-12 text-primary" />
+            <AplLogo size="lg" />
           </div>
           <CardTitle className="text-2xl">智能报告生成工具</CardTitle>
           <CardDescription>请输入您的账号和密码</CardDescription>

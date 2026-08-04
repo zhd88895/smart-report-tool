@@ -9,6 +9,19 @@
 
 import { Request, Response, NextFunction } from 'express';
 import { getConfig } from '../config';
+import { settingsService } from '../services/settingsService';
+
+/**
+ * 解析当前生效的允许来源列表：
+ * 环境变量 ALLOWED_ORIGINS 为基础，叠加系统设置 security.corsOrigin
+ * （逗号分隔，可在系统设置页调整，即时生效；用于追加来源，不会移除环境变量配置的来源）
+ */
+function resolveAllowedOrigins(base: string[]): string[] {
+  const extra = settingsService.get('security.corsOrigin');
+  if (!extra) return base;
+  const extras = extra.split(',').map((s) => s.trim()).filter(Boolean);
+  return [...new Set([...base, ...extras])];
+}
 
 /**
  * CORS配置接口
@@ -88,9 +101,11 @@ export function createCorsMiddleware(options?: CorsOptions): (req: Request, res:
   return (req: Request, res: Response, next: NextFunction): void => {
     try {
       const origin = req.headers.origin;
-      
+      // 每次请求动态解析（环境变量 + 系统设置追加的来源）
+      const allowedOrigins = resolveAllowedOrigins(corsOptions.allowedOrigins || []);
+
       // 检查来源是否允许
-      if (!isOriginAllowed(origin, corsOptions.allowedOrigins || [])) {
+      if (!isOriginAllowed(origin, allowedOrigins)) {
         // 如果来源不在允许列表中，不设置CORS头
         // 这会让浏览器拒绝跨域请求
         next();

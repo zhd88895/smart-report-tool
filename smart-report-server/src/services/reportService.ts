@@ -8,13 +8,15 @@
  */
 
 import { scriptRepository, templateRepository, reportRepository } from '../db/repositories';
+import { userRepository } from '../db/repositories/userRepository';
 import { logger, getLogger, generateTraceId, Logger } from '../utils/logger';
 import { fileManager } from '../utils/file';
 import { createHash, randomUUID } from 'crypto';
 import fs from 'fs/promises';
 import { existsSync, mkdirSync, createReadStream } from 'fs';
 import path from 'path';
-import { spawn, execSync } from 'child_process';
+import { spawn, execSync, execFile } from 'child_process';
+import { promisify } from 'util';
 import EventEmitter from 'events';
 import {
   config,
@@ -29,6 +31,8 @@ import {
 import zlib from 'zlib';
 import { Readable } from 'stream';
 import * as tar from 'tar';
+
+const execFileAsync = promisify(execFile);
 
 // 模块级日志实例（核心业务模块）
 const log = getLogger('ReportService', 'core');
@@ -63,6 +67,8 @@ const EXCLUDED_FILE_NAMES = new Set([
  */
 const INPUT_MANIFEST_NAME = '.input_manifest.json';
 const OUTPUT_MANIFEST_NAME = '.output_manifest.json';
+/** 解压出的临时文件清单，用于脚本运行后清理 */
+const EXTRACTED_FILES_NAME = '.extracted_files.json';
 
 /**
  * 清单文件中的文件条目
@@ -140,6 +146,8 @@ export interface Report {
   author?: string;
   /** 创建时间（前端展示用，同 generatedAt） */
   createdAt?: string;
+  /** 报告来源：'script' = 脚本生成，'ai' = AI 智能分析 */
+  reportSource?: string;
   /** 联合判断详细信息 */
   judgment?: {
     /** 脚本退出码 */
@@ -213,22 +221,98 @@ export class ReportService {
   }
 
   /**
-   * 判断一个文件是否是有效的报告输出文件
-   * 基于白名单扩展名和黑名单文件名/扩展名
+   * 将 author 字段中的 userId 自动替换为显示名称
+   * 兼容旧数据：历史报告可能存储了 userId，查询时做展示层富化
    */
-  private isReportOutputFile(filePath: string): boolean {
+  private async enrichReportAuthor(report: Report): Promise<Report> {
+    if (!report.author || report.author === 'unknown' || report.author === '当前用户') {
+      return report;
+    }
+    // 简单判断：如果 author 看起来像 userId（user_ 开头或 UUID 格式），尝试查询用户
+    const looksLikeUserId = report.author.startsWith('user_') || /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(report.author);
+    if (!looksLikeUserId) {
+      return report;
+    }
+    try {
+      const user = await userRepository.findById(report.author);
+      if (user) {
+        report.author = user.displayName || user.username || report.author;
+      }
+    } catch (err) {
+      // 富化失败不影响主查询，静默忽略
+      log.debug(`富化报告作者失败: ${report.id}`, undefined, { author: report.author, error: err instanceof Error ? err.message : String(err) });
+    }
+    return report;
+  }
+
+  /**
+   * 从输入清单中提取"输入压缩包对应的解压目录名集合"
+   * 例如 202508.zip -> 202508，用于排除脚本运行过程中重复解压出的原始数据
+   */
+  private getArchiveExtractDirNames(inputManifest: InputManifest | null): Set<string> {
+    const names = new Set<string>();
+    for (const f of inputManifest?.files || []) {
+      const baseName = path.basename(f.path);
+      const ext = path.extname(baseName).toLowerCase();
+      if (['.zip', '.tar', '.gz', '.tgz'].includes(ext)) {
+        const dirName = baseName.slice(0, -ext.length);
+        if (dirName) names.add(dirName);
+      }
+    }
+    return names;
+  }
+
+  /**
+   * 判断文件是否位于输入压缩包的解压目录内
+   */
+  private isInsideExtractedArchiveDir(filePath: string, archiveDirNames: Set<string>): boolean {
+    const firstPart = filePath.split(/[/\\]/)[0];
+    return archiveDirNames.has(firstPart);
+  }
+
+  /**
+   * 判断一个文件是否是输入/辅助文件（非报告输出）
+   * 包括脚本源码、辅助文件、模板文件、用户上传的输入文件、压缩包解压后的文件
+   */
+  private isNonOutputFile(filePath: string): boolean {
+    const fileName = path.basename(filePath).toLowerCase();
+
+    // 清单文件本身
+    if (fileName === INPUT_MANIFEST_NAME.toLowerCase() || fileName === OUTPUT_MANIFEST_NAME.toLowerCase()) {
+      return true;
+    }
+
+    // 常见脚本/辅助文件名黑名单
+    if (EXCLUDED_FILE_NAMES.has(fileName)) {
+      return true;
+    }
+
+    // 黑名单扩展名（脚本源码、压缩包、临时文件等）
+    const ext = path.extname(fileName).toLowerCase();
+    if (EXCLUDED_FILE_EXTENSIONS.includes(ext)) {
+      return true;
+    }
+
+    return false;
+  }
+
+  /**
+   * 判断一个文件是否是有效的报告输出文件
+   * 基于白名单扩展名和黑名单文件名/扩展名，并排除输入压缩包解压目录
+   */
+  private isReportOutputFile(filePath: string, archiveDirNames?: Set<string>): boolean {
+    // 先排除非输出文件（脚本、辅助、模板、清单、压缩包等）
+    if (this.isNonOutputFile(filePath)) {
+      return false;
+    }
+
+    // 排除输入压缩包解压出的目录（脚本可能重复解压原始数据）
+    if (archiveDirNames && this.isInsideExtractedArchiveDir(filePath, archiveDirNames)) {
+      return false;
+    }
+
     const fileName = path.basename(filePath).toLowerCase();
     const ext = path.extname(fileName).toLowerCase();
-
-    // 黑名单优先：已知脚本/辅助文件名
-    if (EXCLUDED_FILE_NAMES.has(fileName)) {
-      return false;
-    }
-
-    // 黑名单扩展名
-    if (EXCLUDED_FILE_EXTENSIONS.includes(ext)) {
-      return false;
-    }
 
     // 白名单扩展名
     return REPORT_FILE_EXTENSIONS.includes(ext);
@@ -273,24 +357,32 @@ export class ReportService {
    * 获取报告文件清单（优先 output_manifest，兜底 filePaths，最后白名单扫描）
    */
   private async getReportFilePaths(workspaceDir: string, filePaths?: string[]): Promise<string[]> {
+    const inputManifest = await this.readManifest<InputManifest>(workspaceDir, INPUT_MANIFEST_NAME);
+    const archiveDirNames = this.getArchiveExtractDirNames(inputManifest);
+    const inputFilePaths = new Set((inputManifest?.files || []).map((f) => f.path));
+    const inputFileHashes = new Set((inputManifest?.files || []).map((f) => f.hash));
+
     const outputManifest = await this.readManifest<OutputManifest>(workspaceDir, OUTPUT_MANIFEST_NAME);
     if (outputManifest && outputManifest.files && outputManifest.files.length > 0) {
-      return outputManifest.files.map((f) => f.path);
+      return outputManifest.files
+        .map((f) => f.path)
+        .filter((p) => this.isReportOutputFile(p, archiveDirNames))
+        .filter((p) => !inputFilePaths.has(p) && !inputFileHashes.has(p));
     }
 
     if (filePaths && filePaths.length > 0) {
-      return this.filterReportFiles(filePaths);
+      return this.filterReportFiles(filePaths, archiveDirNames);
     }
 
     const files = await this.listAllFiles(workspaceDir, workspaceDir);
-    return files.filter((f) => this.isReportOutputFile(f));
+    return files.filter((f) => this.isReportOutputFile(f, archiveDirNames));
   }
 
   /**
    * 从文件路径列表中过滤出有效的报告文件
    */
-  private filterReportFiles(filePaths: string[]): string[] {
-    return filePaths.filter((fp) => this.isReportOutputFile(fp));
+  private filterReportFiles(filePaths: string[], archiveDirNames?: Set<string>): string[] {
+    return filePaths.filter((fp) => this.isReportOutputFile(fp, archiveDirNames));
   }
 
   /**
@@ -302,6 +394,7 @@ export class ReportService {
   async getReports(filter?: {
     status?: string;
     generatedBy?: string;
+    reportSource?: string;
   }): Promise<Report[]> {
     const traceId = generateTraceId();
     const startTime = Date.now();
@@ -312,7 +405,9 @@ export class ReportService {
       resultCount: results.length,
     });
 
-    return results;
+    // 富化作者显示名（兼容旧数据）
+    const enriched = await Promise.all(results.map((r) => this.enrichReportAuthor(r)));
+    return enriched;
   }
 
   /**
@@ -322,7 +417,9 @@ export class ReportService {
    * @returns 报告信息或null
    */
   async getReport(reportId: string): Promise<Report | null> {
-    return reportRepository.findById(reportId);
+    const report = await reportRepository.findById(reportId);
+    if (!report) return null;
+    return this.enrichReportAuthor(report);
   }
 
   /**
@@ -477,6 +574,19 @@ export class ReportService {
       emitter.emit('complete', { report });
     } catch (error: any) {
       if (logBuffer.length > 0) await this.flushLogs(reportId, logBuffer);
+
+      // 即使脚本被kill/超时，只要工作目录里生成了报告文件，也保存到 output_manifest
+      // 这样后续 getReportFiles 能优先读取清单，避免兜底扫描混入辅助文件
+      try {
+        const savedFiles = await this.saveOutputManifestFromWorkspace(workspaceDir, addLog);
+        if (savedFiles.length > 0) {
+          addLog(`[恢复] 失败流程中检测到 ${savedFiles.length} 个输出文件，已保存到清单`);
+          await reportRepository.updateFilePaths(reportId, savedFiles);
+        }
+      } catch (manifestErr: any) {
+        addLog(`[调试] 失败流程保存输出清单出错: ${manifestErr.message}`);
+      }
+
       await reportRepository.appendLogs(reportId, [`[错误] 报告生成失败: ${error.message}`]);
       await reportRepository.updateStatus(reportId, 'failed', error.message);
       emitter.emit('error', error.message);
@@ -501,19 +611,39 @@ export class ReportService {
     inputFiles: Array<{ filename: string; path: string; size: number }>,
     inputHashes: string[]
   ): Promise<void> {
+    const nonOutputEntries: ManifestFileEntry[] = [];
+
     // 复制脚本
-    await fs.copyFile(script.filePath, path.join(workspaceDir, script.fileName));
+    const scriptDest = path.join(workspaceDir, script.fileName);
+    await fs.copyFile(script.filePath, scriptDest);
+    nonOutputEntries.push({ path: script.fileName, hash: await this.computeFileHash(scriptDest), size: (await fs.stat(scriptDest)).size });
+
+    // 多文件模式：复制所有额外 .py 文件
+    if (script.isMultiFile && script.extraFiles && script.extraFiles.length > 0) {
+      for (const ef of script.extraFiles) {
+        const dest = path.join(workspaceDir, ef.name);
+        await fs.copyFile(ef.path, dest);
+        nonOutputEntries.push({ path: ef.name, hash: await this.computeFileHash(dest), size: (await fs.stat(dest)).size });
+      }
+    }
+
     // 复制辅助文件
     if (script.auxiliaryFiles) {
       for (const af of script.auxiliaryFiles) {
-        mkdirSync(path.dirname(path.join(workspaceDir, af.name)), { recursive: true });
-        await fs.copyFile(af.path, path.join(workspaceDir, af.name));
+        const dest = path.join(workspaceDir, af.name);
+        mkdirSync(path.dirname(dest), { recursive: true });
+        await fs.copyFile(af.path, dest);
+        nonOutputEntries.push({ path: af.name, hash: await this.computeFileHash(dest), size: (await fs.stat(dest)).size });
       }
     }
+
     // 复制模板
     if (template) {
-      await fs.copyFile(template.filePath, path.join(workspaceDir, template.fileName));
+      const dest = path.join(workspaceDir, template.fileName);
+      await fs.copyFile(template.filePath, dest);
+      nonOutputEntries.push({ path: template.fileName, hash: await this.computeFileHash(dest), size: (await fs.stat(dest)).size });
     }
+
     // 验证并复制输入文件
     const inputFileEntries: ManifestFileEntry[] = [];
     for (let i = 0; i < inputFiles.length; i++) {
@@ -522,12 +652,15 @@ export class ReportService {
       if (inputHashes[i] && actualHash !== inputHashes[i]) {
         throw new Error(`文件「${file.filename}」哈希校验失败`);
       }
-      await fs.copyFile(file.path, path.join(workspaceDir, file.filename));
+      const dest = path.join(workspaceDir, file.filename);
+      await fs.copyFile(file.path, dest);
       inputFileEntries.push({ path: file.filename, hash: actualHash, size: file.size });
     }
+
+    // 输入清单合并：输入文件 + 非输出文件（脚本、辅助、模板）全部记录
     const inputManifest: InputManifest = {
       generatedAt: new Date().toISOString(),
-      files: inputFileEntries,
+      files: [...nonOutputEntries, ...inputFileEntries],
     };
     await this.writeManifest(workspaceDir, INPUT_MANIFEST_NAME, inputManifest);
   }
@@ -615,8 +748,20 @@ export class ReportService {
 
       // 后台模式：文件已由 prepareWorkspace 复制，跳过后面的文件复制
       if (!preWorkspaceDir) {
+        const nonOutputEntries: ManifestFileEntry[] = [];
+
         await fs.copyFile(script.filePath, path.join(workspaceDir, script.fileName));
         allFiles.push(script.fileName);
+        nonOutputEntries.push({ path: script.fileName, hash: await this.computeFileHash(path.join(workspaceDir, script.fileName)), size: (await fs.stat(path.join(workspaceDir, script.fileName))).size });
+
+        // 多文件模式：复制所有额外 .py 文件
+        if (script.isMultiFile && script.extraFiles && script.extraFiles.length > 0) {
+          for (const ef of script.extraFiles) {
+            await fs.copyFile(ef.path, path.join(workspaceDir, ef.name));
+            allFiles.push(ef.name);
+            nonOutputEntries.push({ path: ef.name, hash: await this.computeFileHash(path.join(workspaceDir, ef.name)), size: (await fs.stat(path.join(workspaceDir, ef.name))).size });
+          }
+        }
 
         if (script.auxiliaryFiles && script.auxiliaryFiles.length > 0) {
           for (const af of script.auxiliaryFiles) {
@@ -624,12 +769,14 @@ export class ReportService {
             mkdirSync(path.dirname(destPath), { recursive: true });
             await fs.copyFile(af.path, destPath);
             allFiles.push(af.name);
+            nonOutputEntries.push({ path: af.name, hash: await this.computeFileHash(destPath), size: (await fs.stat(destPath)).size });
           }
         }
 
         if (template) {
           await fs.copyFile(template.filePath, path.join(workspaceDir, template.fileName));
           allFiles.push(template.fileName);
+          nonOutputEntries.push({ path: template.fileName, hash: await this.computeFileHash(path.join(workspaceDir, template.fileName)), size: (await fs.stat(path.join(workspaceDir, template.fileName))).size });
         }
 
         const inputFileEntries: ManifestFileEntry[] = [];
@@ -644,9 +791,10 @@ export class ReportService {
           inputFileNames.push(file.filename);
           inputFileEntries.push({ path: file.filename, hash: actualHash, size: file.size });
         }
+
         const inputManifest: InputManifest = {
           generatedAt: new Date().toISOString(),
-          files: inputFileEntries,
+          files: [...nonOutputEntries, ...inputFileEntries],
         };
         await this.writeManifest(workspaceDir, INPUT_MANIFEST_NAME, inputManifest);
         inputFileEntryCount = inputFileEntries.length;
@@ -686,38 +834,45 @@ export class ReportService {
       for (const fn of allFiles) addLog(`  - ${fn}`);
       addLog('========================================');
 
-      // 解压压缩包
+      // 解压压缩包，并把解压出的文件追加到 input_manifest（避免被识别为报告输出）
+      // 同时记录解压出的临时文件到 .extracted_files.json，供脚本运行后清理
+      const allExtractedEntries: string[] = [];
       for (const fn of [...inputFileNames]) {
         const filePath = path.join(workspaceDir, fn);
         const ext = fn.split('.').pop()?.toLowerCase() || '';
 
-        if (ext === 'tar') {
+        if (ext === 'zip' || ext === 'tar' || ext === 'gz' || ext === 'tgz') {
           addLog('');
-          addLog(`[解压] 检测到 tar 压缩包: ${fn}，开始解压...`);
+          addLog(`[解压] 检测到压缩包: ${fn}，开始解压...`);
           try {
-            const entries = await this.extractTar(filePath, workspaceDir, addLog);
+            const { files: entries } = await this.extractArchive(filePath, workspaceDir, undefined, addLog);
+            const savedInputManifest = await this.readManifest<InputManifest>(workspaceDir, INPUT_MANIFEST_NAME) || { generatedAt: new Date().toISOString(), files: [] };
             for (const e of entries) {
               allFiles.push(e);
               inputFileNames.push(e);
+              allExtractedEntries.push(e);
+              const fullPath = path.join(workspaceDir, e);
+              if (existsSync(fullPath)) {
+                const stat = await fs.stat(fullPath);
+                const hash = await this.computeFileHash(fullPath);
+                savedInputManifest.files.push({ path: e, hash, size: stat.size });
+              }
             }
-            addLog(`[解压] tar 解压完成，共 ${entries.length} 个文件`);
+            await this.writeManifest(workspaceDir, INPUT_MANIFEST_NAME, savedInputManifest);
+            addLog(`[解压] 完成，共 ${entries.length} 个文件`);
           } catch (e: any) {
-            addLog(`[解压] tar 解压失败: ${e.message}`);
-          }
-        } else if (ext === 'gz' || ext === 'tgz') {
-          addLog('');
-          addLog(`[解压] 检测到 gz 压缩包: ${fn}，开始解压...`);
-          try {
-            const entries = await this.extractGz(filePath, workspaceDir, addLog);
-            for (const e of entries) {
-              allFiles.push(e);
-              inputFileNames.push(e);
-            }
-            addLog(`[解压] gz 解压完成，共 ${entries.length} 个文件`);
-          } catch (e: any) {
-            addLog(`[解压] gz 解压失败: ${e.message}`);
+            addLog(`[解压] 失败: ${e.message}`);
           }
         }
+      }
+
+      // 记录所有解压出的临时文件，供脚本运行后清理
+      if (allExtractedEntries.length > 0) {
+        await this.writeManifest(workspaceDir, EXTRACTED_FILES_NAME, {
+          generatedAt: new Date().toISOString(),
+          files: allExtractedEntries,
+        });
+        addLog(`[解压] 已记录 ${allExtractedEntries.length} 个临时文件到 ${EXTRACTED_FILES_NAME}`);
       }
 
       // 设置环境变量
@@ -821,10 +976,11 @@ export class ReportService {
 
       // 读取输入文件清单，排除输入文件（防止脚本把输入文件复制到子目录被误识别为输出）
       const savedInputManifest = await this.readManifest<InputManifest>(workspaceDir, INPUT_MANIFEST_NAME);
+      const archiveDirNames = this.getArchiveExtractDirNames(savedInputManifest);
       const inputFilePaths = new Set((savedInputManifest?.files || []).map((f) => f.path));
       const inputFileHashes = new Set((savedInputManifest?.files || []).map((f) => f.hash));
 
-      // 二次校验：排除输入文件、日志/缓存目录、以及非报告输出文件
+      // 二次校验：排除输入文件、日志/缓存目录、输入压缩包解压目录以及非报告输出文件
       const verifiedOutputFiles: string[] = [];
       for (const f of newFiles) {
         const fullPath = path.join(workspaceDir, f);
@@ -833,6 +989,12 @@ export class ReportService {
         // 排除日志目录和 Python 缓存目录
         const parts = f.split(/[/\\]/);
         if (parts.includes('logs') || parts.includes('__pycache__')) continue;
+
+        // 排除输入压缩包解压出的目录（脚本可能重复解压原始数据）
+        if (this.isInsideExtractedArchiveDir(f, archiveDirNames)) {
+          addLog(`[过滤] 排除输入压缩包解压目录: ${f}`);
+          continue;
+        }
 
         // 排除输入文件（按路径）
         if (inputFilePaths.has(f)) continue;
@@ -845,7 +1007,7 @@ export class ReportService {
         }
 
         // 最终只保留有效的报告输出文件
-        if (!this.isReportOutputFile(f)) {
+        if (!this.isReportOutputFile(f, archiveDirNames)) {
           addLog(`[过滤] 排除非报告输出文件: ${f}`);
           continue;
         }
@@ -867,12 +1029,15 @@ export class ReportService {
       };
       await this.writeManifest(workspaceDir, OUTPUT_MANIFEST_NAME, outputManifest);
 
+      // 脚本执行完毕，清理解压出的临时文件（避免残留占用工作目录空间）
+      await this.cleanupExtractedFiles(workspaceDir, addLog);
+
       // 联合判断：退出码 + 文件生成情况
       const exitCodeSuccess = executionResult.code === 0;
       const hasNewFiles = verifiedOutputFiles.length > 0;
       
       // 检查是否生成了有效的报告文件（排除日志文件、临时文件、脚本辅助文件和输入文件）
-      const generatedReportFiles = this.filterReportFiles(verifiedOutputFiles);
+      const generatedReportFiles = this.filterReportFiles(verifiedOutputFiles, archiveDirNames);
       const hasValidReportFiles = generatedReportFiles.length > 0;
 
       addLog('');
@@ -989,6 +1154,85 @@ export class ReportService {
   }
 
   /**
+   * 保存 AI 智能分析报告
+   * 
+   * 将 AI 分析结果写入数据库和文件系统。
+   * 文件命名规则：AI分析报告（{原始文件名}）_{YY-MM-DD HH-mm-ss}.md
+   * 
+   * @param params - 参数
+   * @returns 创建的报告记录
+   */
+  async saveAIAnalysisReport(params: {
+    content: string;
+    originalFileName: string;
+    category: string;
+    author: string;
+    generatedBy: string;
+  }): Promise<Report> {
+    const { content, originalFileName, category, author, generatedBy } = params;
+    const traceId = generateTraceId();
+
+    // 生成报告ID和工作目录
+    const reportId = randomUUID();
+    const workspaceDir = path.join(this.reportsDir, reportId);
+    mkdirSync(workspaceDir, { recursive: true });
+
+    // 生成时间戳
+    const now = new Date();
+    const dateStr = `${String(now.getFullYear()).slice(2)}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    const timeStr = `${String(now.getHours()).padStart(2, '0')}-${String(now.getMinutes()).padStart(2, '0')}-${String(now.getSeconds()).padStart(2, '0')}`;
+
+    // 文件名：AI分析报告（{原始文件名}）_{YY-MM-DD HH-mm-ss}.md
+    const reportFileName = `AI分析报告（${originalFileName}）_${dateStr} ${timeStr}.md`;
+    const reportFilePath = path.join(workspaceDir, reportFileName);
+
+    // 写入 Markdown 文件
+    await fs.writeFile(reportFilePath, content, 'utf-8');
+
+    // 写入输出清单
+    const outputManifest: OutputManifest = {
+      generatedAt: now.toISOString(),
+      files: [
+        {
+          path: reportFileName,
+          hash: await this.computeFileHash(reportFilePath),
+          size: Buffer.byteLength(content, 'utf-8'),
+        },
+      ],
+    };
+    await this.writeManifest(workspaceDir, OUTPUT_MANIFEST_NAME, outputManifest);
+
+    // 创建数据库记录
+    const isoNow = now.toISOString();
+    const report: Report = {
+      id: reportId,
+      name: reportFileName,
+      description: `${category} 类巡检日志 AI 智能分析报告`,
+      scriptId: 'ai-generated',
+      scriptName: 'AI智能分析',
+      templateId: undefined,
+      templateName: undefined,
+      outputFormat: 'md',
+      workspaceDir,
+      generatedAt: isoNow,
+      generatedBy,
+      status: 'success',
+      logs: ['[AI分析] 分析完成，报告已自动保存'],
+      filePaths: [reportFileName],
+      type: category,
+      region: '',
+      date: isoNow.slice(0, 10),
+      author,
+      createdAt: isoNow,
+      reportSource: 'ai',
+    };
+
+    await reportRepository.create(report);
+    log.info(`AI分析报告已保存: ${reportFileName} (${reportId})`, traceId, { category, originalFileName });
+    return report;
+  }
+
+  /**
    * 获取报告执行日志
    * 
    * @param reportId - 报告ID
@@ -1023,7 +1267,15 @@ export class ReportService {
       return [];
     }
 
-    // 优先读取输出文件清单，确保只返回真正的报告文件
+    const inputManifest = await this.readManifest<InputManifest>(
+      report.workspaceDir,
+      INPUT_MANIFEST_NAME
+    );
+    const archiveDirNames = this.getArchiveExtractDirNames(inputManifest);
+    const inputFilePaths = new Set((inputManifest?.files || []).map((f) => f.path));
+    const inputFileHashes = new Set((inputManifest?.files || []).map((f) => f.hash));
+
+    // 优先读取输出文件清单，但仍需过滤（防止旧清单被污染）
     const outputManifest = await this.readManifest<OutputManifest>(
       report.workspaceDir,
       OUTPUT_MANIFEST_NAME
@@ -1031,8 +1283,17 @@ export class ReportService {
     if (outputManifest && outputManifest.files && outputManifest.files.length > 0) {
       const files: ReportFileInfo[] = [];
       for (const entry of outputManifest.files) {
+        // 排除清单中的非报告文件以及输入压缩包解压目录
+        if (!this.isReportOutputFile(entry.path, archiveDirNames)) continue;
+        if (inputFilePaths.has(entry.path)) continue;
+
         const fullPath = path.join(report.workspaceDir, entry.path);
         if (!existsSync(fullPath)) continue;
+
+        // 二次校验：排除与输入文件哈希相同的文件
+        const hash = await this.computeFileHash(fullPath);
+        if (inputFileHashes.has(hash)) continue;
+
         const stat = await fs.stat(fullPath);
         files.push({
           name: entry.path,
@@ -1041,22 +1302,18 @@ export class ReportService {
           modifiedAt: stat.mtime,
         });
       }
-      return files;
+      if (files.length > 0) return files;
     }
 
-    // 兜底：按白名单/黑名单扫描工作目录，并排除已记录的输入文件
-    const inputManifest = await this.readManifest<InputManifest>(
-      report.workspaceDir,
-      INPUT_MANIFEST_NAME
-    );
-    const inputFilePaths = new Set((inputManifest?.files || []).map((f) => f.path));
-    const inputFileHashes = new Set((inputManifest?.files || []).map((f) => f.hash));
-
+    // 兜底：按白名单/黑名单扫描工作目录，并排除已记录的输入/辅助/模板文件
     const files: ReportFileInfo[] = [];
     await this.collectFilesRecursive(report.workspaceDir, report.workspaceDir, files);
 
     const result: ReportFileInfo[] = [];
     for (const f of files) {
+      // 排除非输出文件（脚本、辅助、模板、压缩包、临时文件等）
+      if (this.isNonOutputFile(f.name)) continue;
+      if (!this.isReportOutputFile(f.name, archiveDirNames)) continue;
       if (inputFilePaths.has(f.name)) continue;
       // 二次校验：排除与输入文件哈希相同的文件
       const hash = await this.computeFileHash(f.path);
@@ -1067,6 +1324,77 @@ export class ReportService {
     }
 
     return result;
+  }
+
+  /**
+   * 扫描工作目录并保存输出文件清单（失败恢复/兜底场景使用）
+   *
+   * @param workspaceDir - 工作目录
+   * @param onLog - 可选日志回调
+   * @returns 保存到清单中的文件路径列表
+   */
+  private async saveOutputManifestFromWorkspace(
+    workspaceDir: string,
+    onLog?: (message: string) => void
+  ): Promise<string[]> {
+    if (!existsSync(workspaceDir)) return [];
+
+    // 读取输入文件清单
+    const inputManifest = await this.readManifest<InputManifest>(workspaceDir, INPUT_MANIFEST_NAME);
+    const archiveDirNames = this.getArchiveExtractDirNames(inputManifest);
+    const inputFilePaths = new Set((inputManifest?.files || []).map((f) => f.path));
+    const inputFileHashes = new Set((inputManifest?.files || []).map((f) => f.hash));
+
+    // 收集当前工作目录所有文件
+    const allFiles: ReportFileInfo[] = [];
+    await this.collectFilesRecursive(workspaceDir, workspaceDir, allFiles);
+
+    const outputFileEntries: ManifestFileEntry[] = [];
+    for (const f of allFiles) {
+      // 排除非输出文件（脚本、辅助、模板、压缩包、临时文件等）
+      if (this.isNonOutputFile(f.name)) {
+        onLog?.(`[过滤] 排除非输出文件: ${f.name}`);
+        continue;
+      }
+
+      // 排除输入压缩包解压出的目录（脚本可能重复解压原始数据）
+      if (this.isInsideExtractedArchiveDir(f.name, archiveDirNames)) {
+        onLog?.(`[过滤] 排除输入压缩包解压目录: ${f.name}`);
+        continue;
+      }
+
+      // 排除输入文件（按路径）
+      if (inputFilePaths.has(f.name)) {
+        onLog?.(`[过滤] 排除输入文件: ${f.name}`);
+        continue;
+      }
+
+      // 排除输入文件（按哈希）
+      const hash = await this.computeFileHash(f.path);
+      if (inputFileHashes.has(hash)) {
+        onLog?.(`[过滤] 排除与输入文件哈希相同的文件: ${f.name}`);
+        continue;
+      }
+
+      // 只保留有效的报告输出文件
+      if (!this.isReportOutputFile(f.name, archiveDirNames)) {
+        onLog?.(`[过滤] 排除非报告输出文件: ${f.name}`);
+        continue;
+      }
+
+      outputFileEntries.push({ path: f.name, hash, size: f.size });
+    }
+
+    if (outputFileEntries.length > 0) {
+      const outputManifest: OutputManifest = {
+        generatedAt: new Date().toISOString(),
+        files: outputFileEntries,
+      };
+      await this.writeManifest(workspaceDir, OUTPUT_MANIFEST_NAME, outputManifest);
+      onLog?.(`[清单] 已保存 ${outputFileEntries.length} 个输出文件到 ${OUTPUT_MANIFEST_NAME}`);
+    }
+
+    return outputFileEntries.map((e) => e.path);
   }
 
   /**
@@ -1129,8 +1457,11 @@ export class ReportService {
     }
 
     // 优先使用数据库中保存的 filePaths（顺序与前端一致），并过滤确保只有报告文件
+    const inputManifest = await this.readManifest<InputManifest>(report.workspaceDir, INPUT_MANIFEST_NAME);
+    const archiveDirNames = this.getArchiveExtractDirNames(inputManifest);
+
     const validFilePaths = report.filePaths && report.filePaths.length > 0
-      ? this.filterReportFiles(report.filePaths)
+      ? this.filterReportFiles(report.filePaths, archiveDirNames)
       : [];
 
     if (validFilePaths.length > 0) {
@@ -1198,8 +1529,8 @@ export class ReportService {
       throw new Error('报告没有文件');
     }
 
-    // 创建tar.gz压缩包，只包含有效的报告文件
-    const archiveName = `${report.name || 'report'}_${reportId}.tar.gz`;
+    // 创建tar.gz压缩包，文件名仅使用 reportId（防止路径遍历）
+    const archiveName = `${reportId}.tar.gz`;
     const archivePath = path.join(this.reportsDir, archiveName);
 
     await this.createTarGz(report.workspaceDir, files, archivePath);
@@ -1232,122 +1563,252 @@ export class ReportService {
     onLog?: (message: string) => void
   ): Promise<{ code: number }> {
     const scriptTimeout = 300000; // 5 minutes
-    const LONG_SILENCE_TIMEOUT = 60000; // 60秒无输出才考虑发送回车
+      const LONG_SILENCE_TIMEOUT = 60000; // 60秒无输出才考虑再次发送回车
+      const INPUT_PROMPT_DEBOUNCE_MS = 3000; // 检测到输入提示后，最多3秒内发送回车
 
-    return new Promise((resolve, reject) => {
-      let enterSent = false;
-      // 输出行缓冲区：处理 stdout/stderr 数据跨 chunk 截断的情况
-      let lineBuffer = '';
+      return new Promise((resolve, reject) => {
+        let enterSent = false;
+        let enterResetTimer: ReturnType<typeof setTimeout> | null = null;
+        // 输出行缓冲区：处理 stdout/stderr 数据跨 chunk 截断的情况
+        let lineBuffer = '';
+        let gracefulKillTimer: ReturnType<typeof setTimeout> | null = null;
+        let timeoutExpired = false;
 
-      onLog?.(`[调试] spawn: cmd="${cmd}", args=${JSON.stringify(args)}, cwd="${cwd}"`);
+        onLog?.(`[调试] spawn: cmd="${cmd}", args=${JSON.stringify(args)}, cwd="${cwd}"`);
 
-      const child = spawn(cmd, args, {
-        cwd,
-        shell: scriptType === 'bat' || scriptType === 'ps1',
-        env,
-        stdio: ['pipe', 'pipe', 'pipe'],
-      });
+        // Shell 模式安全校验：对 fileName 进行额外白名单检查
+        const useShell = scriptType === 'bat' || scriptType === 'ps1';
+        if (useShell) {
+          const SAFE_FILENAME = /^[a-zA-Z0-9\u4e00-\u9fff _\-\.]+$/;
+          if (!SAFE_FILENAME.test(args[0])) {
+            throw new Error(`Shell 模式下文件名不安全: ${args[0]}`);
+          }
+        }
 
-      // 手动超时处理（spawn 不自带 timeout）
-      const timeoutTimer = setTimeout(() => {
-        onLog?.(`[错误] 脚本执行超时 (${scriptTimeout / 1000}秒)，正在终止...`);
-        child.kill('SIGKILL');
-      }, scriptTimeout);
+        const child = spawn(cmd, args, {
+          cwd,
+          shell: useShell,
+          env,
+          stdio: ['pipe', 'pipe', 'pipe'],
+        });
 
-      // 长时间无输出时，检测脚本是否在等待用户输入
-      // 仅在输出中包含 "回车"、"Enter"、"exit" 等关键词时才发送回车
-      let silenceTimer: ReturnType<typeof setTimeout> | null = null;
-      let pendingInputPrompt = false;
-      /** 检测脚本是否在等待输入的常见关键词 */
-      const promptKeywords = ['回车', 'Enter', 'enter', 'exit', '退出'];
+        // 手动超时处理（spawn 不自带 timeout）
+        const timeoutTimer = setTimeout(() => {
+          timeoutExpired = true;
+          onLog?.(`[错误] 脚本执行超时 (${scriptTimeout / 1000}秒)，正在终止...`);
 
-      const scheduleSilenceCheck = () => {
-        if (silenceTimer) clearTimeout(silenceTimer);
-        silenceTimer = setTimeout(() => {
-          // 长时间无输出时检查是否有挂起的输入提示
-          if (child.stdin && !child.stdin.destroyed && !enterSent && pendingInputPrompt) {
-            enterSent = true;
-            onLog?.('[系统] 检测脚本可能等待用户输入，发送回车...');
+          // 先关闭 stdin（发送 EOF），让等待 input() 的脚本自然退出
+          // Python 的 input() 收到 EOF 后会抛 EOFError 导致进程退出，
+          // 这样 child.on('close') 会被触发并清除宽限期定时器。
+          if (child.stdin && !child.stdin.destroyed) {
+            onLog?.('[系统] 关闭 stdin 发送 EOF，尝试让脚本自然退出...');
+            try {
+              child.stdin.write('\n');
+              child.stdin.end();
+            } catch {}
+          }
+
+          // 5 秒宽限期：如果脚本还没退出再强制终止
+          gracefulKillTimer = setTimeout(() => {
+            if (!child.killed) {
+              onLog?.('[系统] 脚本未在宽限期内退出，强制终止...');
+              child.kill('SIGKILL');
+            }
+          }, 5000);
+        }, scriptTimeout);
+
+        // 长时间无输出时，检测脚本是否在等待用户输入
+        let silenceTimer: ReturnType<typeof setTimeout> | null = null;
+        let pendingInputPrompt = false;
+        let inputPromptDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+        /** 检测脚本是否在等待输入的常见关键词 */
+        const promptKeywords = ['回车', 'Enter', 'enter', 'exit', '退出', 'press any key', '按任意键'];
+
+        const resetEnterSent = () => {
+          if (enterResetTimer) clearTimeout(enterResetTimer);
+          enterResetTimer = setTimeout(() => {
+            enterSent = false;
+          }, 15000);
+        };
+
+        const sendEnter = (reason: string) => {
+          if (!child.stdin || child.stdin.destroyed || enterSent) return;
+          enterSent = true;
+          onLog?.(`[系统] ${reason}，发送回车...`);
+          try {
             child.stdin.write('\n');
+          } catch (e: any) {
+            onLog?.(`[系统] 发送回车失败: ${e.message}`);
           }
-        }, LONG_SILENCE_TIMEOUT);
-      };
+          resetEnterSent();
+        };
 
-      /** 去除 ANSI 转义序列 */
-      const stripAnsi = (text: string): string => {
-        return text.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '')
-                   .replace(/\x1b\][0-9;]*[a-zA-Z]/g, '')
-                   .replace(/\x1b[=><F-HK-N]|[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '');
-      };
+        const scheduleSilenceCheck = () => {
+          if (silenceTimer) clearTimeout(silenceTimer);
+          silenceTimer = setTimeout(() => {
+            // 长时间无输出时检查是否有挂起的输入提示，再次发送回车
+            if (pendingInputPrompt) {
+              sendEnter('脚本长时间无输出且仍等待输入');
+            }
+          }, LONG_SILENCE_TIMEOUT);
+        };
 
-      /**
-       * 处理数据块，按行拆分，逐行推送
-       * 解决多个 `\n` 行在同一数据块中合并为一条日志的问题
-       */
-      const handleOutputChunk = (chunk: Buffer, logPrefix: string = '') => {
-        const raw = chunk.toString('utf-8');
-        const cleaned = stripAnsi(raw);
-        // 拼接到行缓冲区
-        lineBuffer += cleaned;
-        // 按 \n 拆分为行
-        const lines = lineBuffer.split('\n');
-        // 最后一个元素可能是不完整的行，保留到下一轮
-        lineBuffer = lines.pop() || '';
-        let hasInputPrompt = false;
-        for (const line of lines) {
-          // 去除行尾 \r (CRLF 行尾)
-          const trimmed = line.replace(/\r$/, '');
-          const msg = logPrefix ? `${logPrefix}${trimmed}` : trimmed;
-          onLog?.(msg);
-          if (!logPrefix && promptKeywords.some((kw) => trimmed.includes(kw))) {
-            hasInputPrompt = true;
+        /** 去除 ANSI 转义序列 */
+        const stripAnsi = (text: string): string => {
+          return text.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '')
+                     .replace(/\x1b\][0-9;]*[a-zA-Z]/g, '')
+                     .replace(/\x1b[=><F-HK-N]|[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '');
+        };
+
+        /**
+         * 处理数据块，按行拆分，逐行推送
+         * 解决多个 `\n` 行在同一数据块中合并为一条日志的问题
+         */
+        const handleOutputChunk = (chunk: Buffer, logPrefix: string = '') => {
+          const raw = chunk.toString('utf-8');
+          const cleaned = stripAnsi(raw);
+          // 拼接到行缓冲区
+          lineBuffer += cleaned;
+          // 按 \n 拆分为行
+          const lines = lineBuffer.split('\n');
+          // 最后一个元素可能是不完整的行，保留到下一轮
+          lineBuffer = lines.pop() || '';
+          let hasInputPrompt = false;
+          for (const line of lines) {
+            // 去除行尾 \r (CRLF 行尾)
+            const trimmed = line.replace(/\r$/, '');
+            const msg = logPrefix ? `${logPrefix}${trimmed}` : trimmed;
+            onLog?.(msg);
+            if (!logPrefix && promptKeywords.some((kw) => trimmed.includes(kw))) {
+              hasInputPrompt = true;
+            }
           }
-        }
-        if (hasInputPrompt) pendingInputPrompt = true;
+          if (hasInputPrompt) {
+            pendingInputPrompt = true;
+            // 检测到输入提示后，延迟很短时间就发送回车（避免脚本还没输出完整提示）
+            if (inputPromptDebounceTimer) clearTimeout(inputPromptDebounceTimer);
+            inputPromptDebounceTimer = setTimeout(() => {
+              sendEnter('检测到脚本输入提示');
+            }, INPUT_PROMPT_DEBOUNCE_MS);
+          }
+          scheduleSilenceCheck();
+        };
+
+        child.stdout.on('data', (data) => {
+          handleOutputChunk(data);
+        });
+
+        child.stderr.on('data', (data) => {
+          handleOutputChunk(data, '[stderr] ');
+        });
+
+        child.on('close', (code, signal) => {
+          clearTimeout(timeoutTimer);
+          if (silenceTimer) clearTimeout(silenceTimer);
+          if (inputPromptDebounceTimer) clearTimeout(inputPromptDebounceTimer);
+          if (enterResetTimer) clearTimeout(enterResetTimer);
+          if (gracefulKillTimer) clearTimeout(gracefulKillTimer);
+          // 刷新缓冲区中残留的不完整行
+          if (lineBuffer.trim()) {
+            const remaining = lineBuffer.replace(/\r$/, '').trim();
+            if (remaining) onLog?.(remaining);
+            lineBuffer = '';
+          }
+          if (signal) {
+            // 如果超时已经触发（timeoutExpired），说明报告文件已经生成
+            if (timeoutExpired) {
+              onLog?.(`[完成] 脚本执行超时但报告文件已生成，退出码: ${code ?? 0}`);
+              resolve({ code: code ?? 0 });
+              return;
+            }
+            onLog?.(`[错误] 脚本被系统终止 (signal: ${signal})`);
+            reject(new Error(`脚本被系统终止 (signal: ${signal})`));
+            return;
+          }
+          onLog?.(`[完成] 脚本退出，退出码: ${code}`);
+          resolve({ code: code ?? 0 });
+        });
+
+        child.on('error', (error) => {
+          clearTimeout(timeoutTimer);
+          if (silenceTimer) clearTimeout(silenceTimer);
+          if (inputPromptDebounceTimer) clearTimeout(inputPromptDebounceTimer);
+          if (enterResetTimer) clearTimeout(enterResetTimer);
+          if (gracefulKillTimer) clearTimeout(gracefulKillTimer);
+          onLog?.(`[错误] 无法启动脚本进程: ${error.message}`);
+          reject(error);
+        });
+
+        // 启动首次静默检查
         scheduleSilenceCheck();
-      };
-
-      child.stdout.on('data', (data) => {
-        handleOutputChunk(data);
       });
+  }
 
-      child.stderr.on('data', (data) => {
-        handleOutputChunk(data, '[stderr] ');
-      });
+  /**
+   * 调用 Python 脚本解压压缩包（支持 zip/tar/tar.gz/tgz/gz）
+   *
+   * @param archivePath - 压缩包路径
+   * @param destDir - 目标目录
+   * @param onLog - 日志回调函数
+   * @returns 解压出的相对文件路径列表
+   */
+  private async extractArchive(
+    archivePath: string,
+    destDir: string,
+    password?: string,
+    onLog?: (message: string) => void
+  ): Promise<{ files: string[]; totalSize: number }> {
+    const pythonPath = EMBEDDED_PYTHON || this.findSystemPython()[0];
+    if (!pythonPath) {
+      throw new Error('未找到可用的 Python 环境');
+    }
 
-      child.on('close', (code, signal) => {
-        clearTimeout(timeoutTimer);
-        if (silenceTimer) clearTimeout(silenceTimer);
-        // 刷新缓冲区中残留的不完整行
-        if (lineBuffer.trim()) {
-          const remaining = lineBuffer.replace(/\r$/, '').trim();
-          if (remaining) onLog?.(remaining);
-          lineBuffer = '';
-        }
-        if (signal) {
-          onLog?.(`[错误] 脚本被系统终止 (signal: ${signal})`);
-          reject(new Error(`脚本被系统终止 (signal: ${signal})`));
-          return;
-        }
-        onLog?.(`[完成] 脚本退出，退出码: ${code}`);
-        resolve({ code: code ?? 0 });
-      });
+    const scriptPath = path.join(process.cwd(), 'scripts', 'extract_archive.py');
+    if (!existsSync(scriptPath)) {
+      throw new Error('未找到解压脚本 scripts/extract_archive.py');
+    }
 
-      child.on('error', (error) => {
-        clearTimeout(timeoutTimer);
-        if (silenceTimer) clearTimeout(silenceTimer);
-        onLog?.(`[错误] 无法启动脚本进程: ${error.message}`);
-        reject(error);
-      });
+    const args = [scriptPath, archivePath, destDir];
+    if (password) {
+      args.push('--password', password);
+    }
 
-      // 启动首次静默检查
-      scheduleSilenceCheck();
+    const { stdout, stderr } = await execFileAsync(pythonPath, args, {
+      encoding: 'utf-8',
+      maxBuffer: 10 * 1024 * 1024,
+      timeout: 60000,
     });
+
+    if (stderr) {
+      onLog?.(`[解压] ${stderr.trim()}`);
+    }
+
+    // 解析 JSON 输出（新脚本输出 JSON，兼容旧格式）
+    let result: any;
+    try {
+      result = JSON.parse(stdout.trim());
+    } catch {
+      // 旧格式：每行一个文件名
+      const files = stdout
+        .split('\n')
+        .map((l) => l.trim())
+        .filter(Boolean);
+      return { files, totalSize: 0 };
+    }
+
+    if (!result.success) {
+      throw new Error(result.error || '解压失败');
+    }
+
+    return {
+      files: result.files || [],
+      totalSize: result.total_size || 0,
+    };
   }
 
   /**
    * 解压tar文件
-   * 
+   *
    * @param filePath - tar文件路径
    * @param destDir - 目标目录
    * @param onLog - 日志回调函数
@@ -1356,16 +1817,15 @@ export class ReportService {
   private async extractTar(
     tarPath: string,
     destDir: string,
+    password?: string,
     onLog?: (message: string) => void
-  ): Promise<string[]> {
-    // 简化实现，实际应用中需要使用tar库
-    onLog?.(`[解压] tar解压功能需要额外实现`);
-    return [];
+  ): Promise<{ files: string[]; totalSize: number }> {
+    return this.extractArchive(tarPath, destDir, password, onLog);
   }
 
   /**
    * 解压gz文件
-   * 
+   *
    * @param filePath - gz文件路径
    * @param destDir - 目标目录
    * @param onLog - 日志回调函数
@@ -1374,11 +1834,27 @@ export class ReportService {
   private async extractGz(
     gzPath: string,
     destDir: string,
+    password?: string,
     onLog?: (message: string) => void
-  ): Promise<string[]> {
-    // 简化实现，实际应用中需要使用zlib
-    onLog?.(`[解压] gz解压功能需要额外实现`);
-    return [];
+  ): Promise<{ files: string[]; totalSize: number }> {
+    return this.extractArchive(gzPath, destDir, password, onLog);
+  }
+
+  /**
+   * 解压zip文件
+   *
+   * @param filePath - zip文件路径
+   * @param destDir - 目标目录
+   * @param onLog - 日志回调函数
+   * @returns 解压的文件列表
+   */
+  private async extractZip(
+    zipPath: string,
+    destDir: string,
+    password?: string,
+    onLog?: (message: string) => void
+  ): Promise<{ files: string[]; totalSize: number }> {
+    return this.extractArchive(zipPath, destDir, password, onLog);
   }
 
   /**
@@ -1485,6 +1961,50 @@ export class ReportService {
    * 查找系统中可用的 Python 可执行文件
    * 按优先级尝试：内嵌 Python → py 启动器 → python3 → python
    */
+  /**
+   * 清理脚本运行后残留的解压临时文件
+   * 读取 .extracted_files.json，删除其中列出的所有文件，然后删除清单本身
+   */
+  private async cleanupExtractedFiles(
+    workspaceDir: string,
+    onLog?: (message: string) => void
+  ): Promise<void> {
+    try {
+      const manifestPath = path.join(workspaceDir, EXTRACTED_FILES_NAME);
+      if (!existsSync(manifestPath)) return;
+
+      const manifest = await this.readManifest<{ files: string[] }>(workspaceDir, EXTRACTED_FILES_NAME);
+      if (!manifest?.files?.length) {
+        await fs.unlink(manifestPath).catch(() => {});
+        return;
+      }
+
+      let deletedCount = 0;
+      let failedCount = 0;
+      for (const f of manifest.files) {
+        const fullPath = path.join(workspaceDir, f);
+        try {
+          await fs.unlink(fullPath);
+          deletedCount++;
+        } catch (err: any) {
+          if (err.code !== 'ENOENT') {
+            failedCount++;
+            onLog?.(`[清理] 删除临时文件失败: ${f} - ${err.message}`);
+          }
+        }
+      }
+
+      // 删除清单文件自身
+      await fs.unlink(manifestPath).catch(() => {});
+
+      if (deletedCount > 0) {
+        onLog?.(`[清理] 已删除 ${deletedCount} 个解压临时文件${failedCount > 0 ? `，${failedCount} 个失败` : ''}`);
+      }
+    } catch (err: any) {
+      onLog?.(`[清理] 临时文件清理异常: ${err.message}`);
+    }
+  }
+
   private findSystemPython(): [string, string[]] {
     // 0. 最优先：内嵌 Python 环境
     if (existsSync(EMBEDDED_PYTHON)) {
@@ -1588,10 +2108,19 @@ export class ReportService {
         p.on('error', reject);
       });
 
+      // 安全校验：包名（不含版本限定符/ extras）必须符合 PyPI 命名规范（深度防御）
+      const PIP_PACKAGE_REGEX = /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/;
+      for (const req of requirements) {
+        const pkgName = req.match(/^([a-zA-Z0-9][a-zA-Z0-9._-]*)/)?.[1] || '';
+        if (!PIP_PACKAGE_REGEX.test(pkgName)) {
+          throw new Error(`无效的依赖包名: ${req}`);
+        }
+      }
+
       // 找出缺失的包
       const missing: string[] = [];
       for (const req of requirements) {
-        const pkgName = req.replace(/[<>=!~].*$/, '').trim().toLowerCase();
+        const pkgName = (req.match(/^([a-zA-Z0-9][a-zA-Z0-9._-]*)/)?.[1] || '').toLowerCase();
         if (!installed.has(pkgName)) {
           missing.push(req);
           onLog?.(`[环境检查] 缺少: ${req}`);
@@ -1607,8 +2136,8 @@ export class ReportService {
           `[环境安装] 开始安装 ${missing.length} 个缺失的包...`
         );
         const installArgs = pipPath?.endsWith('.exe')
-          ? ['install', ...missing]
-          : [...pythonArgs, '-m', 'pip', 'install', ...missing];
+          ? ['install', '--progress-bar', 'off', '--index-url', config.PIP_INDEX_URL, ...missing]
+          : [...pythonArgs, '-m', 'pip', 'install', '--progress-bar', 'off', '--index-url', config.PIP_INDEX_URL, ...missing];
         const pipInstallExe = pipPath?.endsWith('.exe') ? pipPath : pythonExe;
         const installResult = await new Promise<{ code: number; out: string }>(
           (resolve, reject) => {
@@ -1719,7 +2248,7 @@ export class ReportService {
     };
 
     // 读取辅助文件目录
-    const auxDir = path.join(scriptDir, 'aux');
+    const auxDir = path.join(scriptDir, 'auxfiles');
     if (existsSync(auxDir)) {
       const auxEntries = await fs.readdir(auxDir);
       for (const ae of auxEntries) {

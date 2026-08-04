@@ -7,7 +7,8 @@
  * - 401 响应时自动触发登出事件
  */
 
-const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:3001/api';
+// 使用相对路径，通过 Vite proxy 转发到后端，同时支持本地和隧道访问
+const API_BASE = import.meta.env.VITE_API_BASE || '/api';
 
 export function getApiUrl(path: string): string {
   return `${API_BASE}${path}`;
@@ -176,6 +177,93 @@ export async function apiPatch(path: string, body?: any): Promise<any> {
 }
 
 /**
+ * 获取 Python 版本列表
+ */
+export async function apiGetPythonVersions(): Promise<{ versions: any[] }> {
+  const res = await fetchWithAuth(`${API_BASE}/python-versions/available`);
+  if (!res.ok) throw new Error(`获取 Python 版本列表失败: ${res.status}`);
+  const data = await res.json();
+  return { versions: data?.data?.versions || data?.versions || [] };
+}
+
+/**
+ * 下载并安装 Python 版本（SSE 流式）
+ */
+export async function apiDownloadPythonVersion(
+  version: string,
+  onProgress: (progress: { stage: string; progress: number; message: string }) => void
+): Promise<{ success: boolean; message: string }> {
+  const url = getApiUrl(`/python-versions/${version}/download`);
+  const res = await fetchWithAuth(url, { method: 'POST' });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: '网络错误' }));
+    throw new Error(err.error || '下载失败');
+  }
+
+  const reader = res.body!.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let result: { success: boolean; message: string } | null = null;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+
+    for (const line of lines) {
+      if (line.startsWith('data:')) {
+        try {
+          const data = JSON.parse(line.slice(5).trim());
+          if (data.stage) {
+            onProgress({
+              stage: data.stage,
+              progress: data.progress,
+              message: data.message,
+            });
+          }
+          if (data.success !== undefined) {
+            result = { success: data.success, message: data.message };
+          }
+        } catch {}
+      }
+    }
+  }
+
+  return result || { success: false, message: '未收到完成事件' };
+}
+
+/**
+ * 删除已安装的 Python 版本
+ */
+export async function apiDeletePythonVersion(version: string): Promise<{ success: boolean; message: string }> {
+  const res = await fetchWithAuth(`${API_BASE}/python-versions/${version}`, { method: 'DELETE' });
+  if (!res.ok) throw new Error(`删除失败: ${res.status}`);
+  return res.json();
+}
+
+/**
+ * 上传前 hash 预检查（秒传判定）：返回已存在于服务端去重存储的 hash → 文件信息
+ */
+export async function checkFileHashes(hashes: string[]): Promise<Record<string, { fileName: string; size: number }>> {
+  try {
+    const res = await fetchWithAuth(`${API_BASE}/files/check-hashes`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ hashes }),
+    });
+    if (!res.ok) return {};
+    const data = await res.json();
+    return data.data?.existing || {};
+  } catch {
+    return {};
+  }
+}
+
+/**
  * 生成报告（SSE 事件流，携带 Cookie）
  */
 export async function apiGenerateReport(
@@ -186,6 +274,8 @@ export async function apiGenerateReport(
     reportInfo: any;
     inputFiles: File[];
     inputHashes?: string[];
+    /** 命中秒传的文件索引（与 inputFiles/inputHashes 同索引），这些文件不上传、按 hash 引用 */
+    dedupIndices?: number[];
     requirements?: string[];
   },
   onLog: (msg: string) => void,
@@ -202,9 +292,18 @@ export async function apiGenerateReport(
   if (params.inputHashes && params.inputHashes.length > 0) {
     formData.append('inputHashes', JSON.stringify(params.inputHashes));
   }
+  const dedupSet = new Set(params.dedupIndices ?? []);
+  const dedupRefs: Record<number, string> = {};
   params.inputFiles.forEach((file, idx) => {
-    formData.append(`inputFile${idx}`, file);
+    if (dedupSet.has(idx)) {
+      dedupRefs[idx] = params.inputHashes?.[idx] || '';
+    } else {
+      formData.append(`inputFile${idx}`, file);
+    }
   });
+  if (Object.keys(dedupRefs).length > 0) {
+    formData.append('dedupRefs', JSON.stringify(dedupRefs));
+  }
 
   const res = await fetchWithAuth(
     `${API_BASE}/reports/generate`,
@@ -320,4 +419,45 @@ export async function pollReportLogs(reportId: string): Promise<string[]> {
   const res = await fetchWithAuth(`${API_BASE}/reports/${reportId}/logs`);
   if (!res.ok) throw new Error(`Poll logs failed: ${res.status}`);
   return res.json().then((d) => d.data?.logs || []);
+}
+
+/**
+ * 上传压缩包并解压（报告创建流程中调用）
+ * @param file 压缩包文件
+ * @param password 可选解压密码
+ * @returns 解压结果
+ */
+export async function apiExtractArchive(
+  file: File,
+  password?: string
+): Promise<{
+  success: boolean;
+  needPassword?: boolean;
+  files?: { name: string; path: string; size: number }[];
+  totalSize?: number;
+  extractDir?: string;
+  error?: string;
+  errorDetail?: string;
+  errorCode?: string;
+  archivePath?: string;
+  needExtract?: boolean;
+}> {
+  const formData = new FormData();
+  formData.append('file', file);
+  if (password) {
+    formData.append('password', password);
+  }
+
+  const res = await fetchWithAuth(`${API_BASE}/reports/extract-archive`, {
+    method: 'POST',
+    body: formData,
+  });
+
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({ message: '解压请求失败' }));
+    throw new Error(data.message || data.data?.error || `解压失败 (${res.status})`);
+  }
+
+  const data = await res.json();
+  return data.data || {};
 }

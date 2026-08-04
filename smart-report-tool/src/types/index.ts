@@ -12,7 +12,19 @@ export type AuxFileType = 'txt' | 'xlsx' | 'md' | 'html' | 'csv' | 'json';
 export interface User {
   id: string;
   username: string;
+  /** ⚠️ 仅用于前端表单/创建时，服务端返回数据中此字段始终为空字符串 */
   password: string;
+  role: UserRole;
+  displayName: string;
+  status: UserStatus;
+  region: ScriptRegion;
+  createdAt: string;
+}
+
+/** 服务端返回的用户信息（不含 password） */
+export interface UserResponse {
+  id: string;
+  username: string;
   role: UserRole;
   displayName: string;
   status: UserStatus;
@@ -50,15 +62,21 @@ export interface Script {
   templateIds: string[];
   /** 辅助文件 */
   auxiliaryFiles: AuxFile[];
+  /** 多文件模式下的额外 .py 文件 */
+  extraFiles: AuxFile[];
   /** Python 依赖包列表，如 ["python-docx", "pandas>=1.0"] */
   requirements: string[];
   /** 依赖安装状态 */
   depsStatus?: {
-    status: 'none' | 'installing' | 'done' | 'failed';
+    status: 'none' | 'env_ready' | 'installing' | 'done' | 'failed';
     log: string;
     packages: string[];
     error?: string;
   };
+  /** Python 版本，如 'embedded'、'3.11.9'、'3.12.8' */
+  pythonVersion?: string;
+  /** 是否为多文件脚本模式 */
+  isMultiFile?: boolean;
   uploadedAt: string;
   uploadedBy: string;
 }
@@ -117,6 +135,8 @@ export interface Report {
   /** 工作目录路径 */
   workspaceDir?: string;
   createdAt: string;
+  /** 报告来源：'script' = 脚本生成，'ai' = AI 智能分析 */
+  reportSource?: string;
   /** 联合判断详细信息 */
   judgment?: {
     /** 脚本退出码 */
@@ -139,6 +159,10 @@ export interface ConversationMessage {
   content: string;
   intent?: AIIntent;
   timestamp: string;
+  /** AI 工具调用轨迹（assistant 消息，可选） */
+  toolCalls?: Array<{ name: string; ok: boolean; summary: string }>;
+  /** 待确认工具（assistant 消息，可选）：确认/取消后由页面本地维护终态 */
+  pendingConfirm?: { pendingId: string; tool: string; argsSummary: string };
 }
 
 export interface Conversation {
@@ -169,6 +193,8 @@ export interface InputFileEntry {
   file: File;
   /** SHA-256 哈希值，用于完整性校验 */
   hash?: string;
+  /** 命中服务端去重存储（秒传），生成时不上传、按 hash 引用 */
+  dedup?: boolean;
   /** 如果是压缩包，解压后的子文件 */
   extractedFiles?: { name: string; size: number; content: string }[];
   /** 是否来自压缩包 */
@@ -212,5 +238,7 @@ export type FeatureKey =
   | 'users'
   | 'conversations'
   | 'settings'
+  | 'ai-settings'
+  | 'systemSettings'
   | 'downloadReport'
   | 'approveUser';

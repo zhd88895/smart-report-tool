@@ -2,12 +2,13 @@ import { Download, Pencil, Upload } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { formatFileSize } from '@/utils/formatters';
 
+/** 脚本类型配色 — 引用 index.css 中的语义 token（--script-*-bg/fg），不在组件内硬编码色值 */
 export const SCRIPT_COLORS: Record<string, { bg: string; text: string }> = {
-  python: { bg: '#e8f0fe', text: '#1967d2' },
-  bat: { bg: '#f3e8fd', text: '#7b1fa2' },
-  ps1: { bg: '#e8f5e9', text: '#2e7d32' },
-  powershell: { bg: '#e8f5e9', text: '#2e7d32' },
-  sh: { bg: '#fff3e0', text: '#e65100' },
+  python: { bg: 'hsl(var(--script-python-bg))', text: 'hsl(var(--script-python-fg))' },
+  bat: { bg: 'hsl(var(--script-bat-bg))', text: 'hsl(var(--script-bat-fg))' },
+  ps1: { bg: 'hsl(var(--script-ps-bg))', text: 'hsl(var(--script-ps-fg))' },
+  powershell: { bg: 'hsl(var(--script-ps-bg))', text: 'hsl(var(--script-ps-fg))' },
+  sh: { bg: 'hsl(var(--script-sh-bg))', text: 'hsl(var(--script-sh-fg))' },
 };
 
 function getScriptAbbr(type: string): string {
@@ -28,7 +29,7 @@ export interface ScriptFileCardProps {
 }
 
 export function ScriptFileCard({ fileName, fileSize, scriptType, onDownload, onEdit, onReupload, showActions, bordered = false }: ScriptFileCardProps) {
-  const colors = SCRIPT_COLORS[scriptType] || { bg: '#f5f5f5', text: '#333' };
+  const colors = SCRIPT_COLORS[scriptType] || { bg: 'hsl(var(--script-default-bg))', text: 'hsl(var(--script-default-fg))' };
   const containerClasses = bordered
     ? 'flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-primary/40 bg-primary/5 p-10 transition-colors'
     : 'flex flex-col items-center justify-center rounded-xl border border-border bg-card shadow-md p-10 transition-all';

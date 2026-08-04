@@ -8,6 +8,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
+import { EmptyState } from '@/components/common/EmptyState';
 import { ChevronLeft, ChevronRight, ChevronUp, ChevronDown, ArrowUpDown } from 'lucide-react';
 
 interface Column<T> {
@@ -66,8 +67,8 @@ export function DataTable<T>({ columns, data, rowKey, keyExtractor, pageSize = 1
           <TableBody>
             {pageData.length === 0 && (
               <TableRow>
-                <TableCell colSpan={columns.length} className="h-24 text-center text-muted-foreground">
-                  暂无数据
+                <TableCell colSpan={columns.length}>
+                  <EmptyState />
                 </TableCell>
               </TableRow>
             )}

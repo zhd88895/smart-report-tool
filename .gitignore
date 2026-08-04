@@ -3,10 +3,27 @@ dist/
 *.tsbuildinfo
 .codebuddy/
 .workbuddy/
-repo.bundle
-repo-temp/
+
+# 数据与运行时文件（不同步到 GitHub）
 data/
 smart-report-server/data/
-.env
-*.zip
+logs/
 *.log
+*.db
+*.db-shm
+*.db-wal
+.env
+.env.local
+*.zip
+
+# 测试样例数据
+samples/
+
+# 本地仓库备份与临时文件
+.git-backup/
+.superpowers/
+.tmp/
+smart-report-tool.7z
+%DEST%/
+repo.bundle
+repo-temp/

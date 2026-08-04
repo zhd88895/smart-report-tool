@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { EmptyState } from '@/components/common/EmptyState';
 
 export interface TemplatePickerProps {
   open: boolean;
@@ -68,7 +69,9 @@ export function TemplatePicker({ open, onOpenChange, docTemplates, selectedTempl
                 return true;
               });
               if (filtered.length === 0) {
-                return <p className="text-sm text-muted-foreground text-center py-12">{search || filterType ? '无匹配模板' : '暂无模板，请上传'}</p>;
+                return search || filterType
+                  ? <EmptyState title="无匹配模板" description="" />
+                  : <EmptyState title="暂无模板" description="请上传模板" />;
               }
               return (
                 <div className="divide-y">

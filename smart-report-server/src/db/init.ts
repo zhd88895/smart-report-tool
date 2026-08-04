@@ -2,7 +2,6 @@
  * 数据库初始化入口
  *
  * 在应用启动时调用，完成数据库连接、建表、默认管理员创建等。
- * 包含从 JSON 数据库迁移到 SQLite 的逻辑。
  *
  * @module db/init
  */
@@ -10,25 +9,25 @@
 import bcrypt from 'bcryptjs';
 import { initDatabase } from './database';
 import { userRepository } from './repositories';
-import { migrateJsonToSqlite } from './migrate-json-to-sqlite';
 import { config } from '../config';
 import { logger } from '../utils/logger';
 
 export async function initializeDatabase(): Promise<void> {
-  // 首先尝试从 JSON 迁移到 SQLite（如果需要）
-  try {
-    await migrateJsonToSqlite();
-  } catch (error: any) {
-    logger.warn(`JSON 迁移失败或跳过: ${error.message}`);
-  }
-  
   // 初始化 SQLite 数据库
   await initDatabase();
 
-  // 检查是否有管理员用户
+  // 检查是否有管理员用户，首次启动创建默认管理员
   const hasAdmin = await userRepository.existsAdmin();
   if (!hasAdmin) {
-    const hashedPassword = bcrypt.hashSync('admin123', config.BCRYPT_ROUNDS);
+    const initialPassword = process.env.ADMIN_INITIAL_PASSWORD;
+    if (!initialPassword) {
+      logger.error('首次启动需要设置环境变量 ADMIN_INITIAL_PASSWORD 作为默认管理员密码');
+      throw new Error('ADMIN_INITIAL_PASSWORD 未设置，请设置此环境变量后重新启动');
+    }
+    if (initialPassword.length < 8) {
+      throw new Error('ADMIN_INITIAL_PASSWORD 长度不能少于 8 位');
+    }
+    const hashedPassword = bcrypt.hashSync(initialPassword, config.BCRYPT_ROUNDS);
     await userRepository.create({
       id: `admin_${Date.now()}`,
       username: 'admin',
@@ -40,7 +39,7 @@ export async function initializeDatabase(): Promise<void> {
       createdAt: new Date().toISOString(),
       loginAttempts: 0,
     });
-    logger.info('Created default admin user: admin');
+    logger.info('已创建默认管理员账户 admin（请登录后立即修改密码）');
   }
   
   logger.info('数据库初始化完成');

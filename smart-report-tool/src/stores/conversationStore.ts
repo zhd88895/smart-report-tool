@@ -13,6 +13,7 @@ interface ConversationState {
   appendMessage: (conversationId: string, message: ConversationMessage) => Promise<void>;
   sendMessage: (conversationId: string, message: ConversationMessage) => Promise<void>;
   setCurrentConversation: (conversation: Conversation | null) => void;
+  resetConversations: () => void;
 }
 
 export const useConversationStore = create<ConversationState>((set, get) => ({
@@ -92,5 +93,9 @@ export const useConversationStore = create<ConversationState>((set, get) => ({
 
   setCurrentConversation: (conversation) => {
     set({ currentConversation: conversation });
+  },
+
+  resetConversations: () => {
+    set({ conversations: [], currentConversation: null, error: null });
   },
 }));

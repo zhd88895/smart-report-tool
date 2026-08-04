@@ -318,7 +318,6 @@ export default function UsersPage() {
             <CardHeader><CardTitle>待审核用户</CardTitle></CardHeader>
             <CardContent>
               <DataTable columns={pendingColumns} data={pendingUsers} keyExtractor={(item) => item.id} />
-              {pendingUsers.length === 0 && <div className="text-center text-muted-foreground py-8">暂无待审核用户</div>}
             </CardContent>
           </Card>
         </TabsContent>

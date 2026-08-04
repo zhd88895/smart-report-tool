@@ -1,5 +1,6 @@
 import { Navigate, useLocation } from 'react-router-dom';
 import { useAuthStore } from '@/stores/authStore';
+import { LoadingSpinner } from '@/components/common/LoadingSpinner';
 import { canAccess } from '@/utils/permissions';
 import { ROUTES } from '@/constants/routes';
 import type { FeatureKey } from '@/types';
@@ -16,7 +17,7 @@ export function RouteGuard({ children, requiredFeature }: RouteGuardProps) {
   if (isLoading) {
     return (
       <div className="flex h-screen items-center justify-center">
-        <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+        <LoadingSpinner />
       </div>
     );
   }

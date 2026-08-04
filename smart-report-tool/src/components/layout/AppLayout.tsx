@@ -1,17 +1,61 @@
-import { Outlet, useLocation } from 'react-router-dom';
+import { useEffect } from 'react';
+import { Outlet } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { TopNav } from './TopNav';
 import { useUIStore } from '@/stores/uiStore';
-import { ROUTES } from '@/constants/routes';
+import { SIDEBAR_WIDTH_COLLAPSED, SIDEBAR_WIDTH_EXPANDED } from '@/constants/layout';
+import { getApiUrl } from '@/services/api';
+
+/**
+ * 心跳节流间隔（5 分钟）
+ *
+ * 相对后端 SESSION_EXPIRY_MINUTES 默认值 30 分钟设计：
+ * 用户持续活动时最多每 5 分钟续期一次，远小于过期窗口；
+ * 连续无操作超过会话过期时长仍会话失效（安全语义不变）。
+ */
+const HEARTBEAT_THROTTLE_MS = 5 * 60 * 1000;
 
 export function AppLayout() {
   const { sidebarCollapsed } = useUIStore();
-  const location = useLocation();
-  const isLoginPage = location.pathname === ROUTES.LOGIN;
 
-  if (isLoginPage) {
-    return <Outlet />;
-  }
+  useEffect(() => {
+    let lastHeartbeatAt = 0;
+    let inFlight = false;
+
+    const sendHeartbeat = () => {
+      const now = Date.now();
+      if (inFlight || now - lastHeartbeatAt < HEARTBEAT_THROTTLE_MS) return;
+      lastHeartbeatAt = now;
+      inFlight = true;
+      fetch(getApiUrl('/users/heartbeat'), {
+        method: 'POST',
+        credentials: 'include',
+      })
+        .then((res) => {
+          // 会话已失效（如服务器重启）：触发统一登出，保持踢出语义
+          if (res.status === 401) {
+            window.dispatchEvent(new CustomEvent('auth:unauthorized'));
+          }
+        })
+        .catch(() => {
+          // 网络异常忽略，下次活动再试
+        })
+        .finally(() => {
+          inFlight = false;
+        });
+    };
+
+    const activityEvents = ['click', 'keydown', 'scroll'] as const;
+    activityEvents.forEach((event) =>
+      window.addEventListener(event, sendHeartbeat, { passive: true, capture: true })
+    );
+
+    return () => {
+      activityEvents.forEach((event) =>
+        window.removeEventListener(event, sendHeartbeat, { capture: true })
+      );
+    };
+  }, []);
 
   return (
     <div className="flex h-screen w-full bg-background">
@@ -21,7 +65,7 @@ export function AppLayout() {
         <main
           className="flex-1 overflow-auto p-6 pt-20"
           style={{
-            marginLeft: sidebarCollapsed ? '64px' : '240px',
+            marginLeft: sidebarCollapsed ? SIDEBAR_WIDTH_COLLAPSED : SIDEBAR_WIDTH_EXPANDED,
             transition: 'margin-left 0.3s ease',
           }}
         >

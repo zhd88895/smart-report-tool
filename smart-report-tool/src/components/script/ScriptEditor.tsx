@@ -3,6 +3,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
+import { LoadingSpinner } from '@/components/common/LoadingSpinner';
 import { getApiUrl, fetchWithAuth } from '@/services/api';
 
 interface ScriptEditorProps {
@@ -61,7 +62,7 @@ export function ScriptEditor({ open, onOpenChange, scriptId, fileName }: ScriptE
         </DialogHeader>
         <div className="flex-1 min-h-0 py-2">
           {loading ? (
-            <div className="flex items-center justify-center h-64 text-muted-foreground">加载中...</div>
+            <LoadingSpinner text="加载中..." className="h-64" />
           ) : (
             <Textarea
               value={content}

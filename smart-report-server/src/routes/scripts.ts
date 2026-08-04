@@ -12,7 +12,7 @@ import { scriptService } from '../services/scriptService';
 import { authenticate, authorize } from '../middleware/auth';
 import { uploadScriptFiles } from '../middleware/upload';
 import { fileManager } from '../utils/file';
-import { ApiResponse } from '../types';
+import { ApiResponse, safeErrorMessage } from '../types';
 import { existsSync, createReadStream } from 'fs';
 
 /**
@@ -45,6 +45,9 @@ export class ScriptRoutes {
 
     // 删除脚本（需要认证）
     this.router.delete('/:id', authenticate, this.deleteScript.bind(this));
+
+    // 清空多文件模式下的脚本文件（需要认证）
+    this.router.delete('/:id/files', authenticate, this.clearScriptFiles.bind(this));
 
     // 获取脚本内容（需要认证）
     this.router.get(
@@ -103,7 +106,7 @@ export class ScriptRoutes {
         code: 500,
         data: null,
         message: '获取脚本列表失败',
-        error: error.message,
+        error: safeErrorMessage(error),
       };
 
       res.status(500).json(response);
@@ -173,6 +176,35 @@ export class ScriptRoutes {
         });
       }
 
+      // 多文件模式：收集额外的 .py 脚本文件（scriptFile1, scriptFile2, ...）
+      const extraScriptFiles: Array<{
+        filename: string;
+        path: string;
+        size: number;
+      }> = [];
+      const isMultiFile = body.isMultiFile === 'true';
+      if (isMultiFile) {
+        const scriptKeys = Object.keys(files || {})
+          .filter((key) => /^scriptFile\d+$/.test(key))
+          .sort((a, b) => {
+            const idxA = parseInt(a.replace('scriptFile', ''), 10);
+            const idxB = parseInt(b.replace('scriptFile', ''), 10);
+            return idxA - idxB;
+          });
+        for (const key of scriptKeys) {
+          const f = files?.[key]?.[0];
+          if (!f) continue;
+          if (f.size > 5 * 1024 * 1024) {
+            throw new Error(`额外脚本文件 ${f.originalname} 超过 5MB 限制`);
+          }
+          extraScriptFiles.push({
+            filename: f.originalname,
+            path: f.path,
+            size: f.size,
+          });
+        }
+      }
+
       const script = await scriptService.uploadScript(
         {
           filename: scriptFile.originalname,
@@ -192,8 +224,11 @@ export class ScriptRoutes {
           templateIds: body.templateIds ? JSON.parse(body.templateIds) : [],
           requirements: body.requirements ? JSON.parse(body.requirements) : [],
           uploadedBy: req.user?.userId,
+          pythonVersion: body.pythonVersion || 'embedded',
+          isMultiFile,
           auxiliaryFiles,
-        }
+        },
+        extraScriptFiles.length > 0 ? extraScriptFiles : undefined
       );
 
       const response: ApiResponse<typeof script> = {
@@ -208,7 +243,7 @@ export class ScriptRoutes {
         code: 400,
         data: null,
         message: '脚本上传失败',
-        error: error.message,
+        error: safeErrorMessage(error),
       };
 
       res.status(400).json(response);
@@ -229,7 +264,15 @@ export class ScriptRoutes {
 
       const isMultipart = files !== undefined;
 
-      // 处理新脚本文件替换
+      // 1. 先更新元数据（包括 extraFiles 同步），这样删除旧 extra/主文件时不会误伤新文件
+      const updateData = isMultipart
+        ? this.parseMultipartMetadata(body)
+        : body;
+      if (updateData && Object.keys(updateData).length > 0) {
+        await scriptService.updateScript(id, updateData);
+      }
+
+      // 2. 处理新脚本文件替换（主入口）
       const scriptFile = files?.['scriptFile']?.[0];
       if (scriptFile) {
         await scriptService.replaceScriptFile(id, {
@@ -239,18 +282,30 @@ export class ScriptRoutes {
         });
       }
 
-      // 处理新上传的辅助文件
+      // 3. 处理多文件模式下的额外 .py 文件（如果上传了新文件）
+      const extraScriptFiles: Array<{ filename: string; path: string; size: number }> = [];
+      if (body && (body as any).isMultiFile === 'true') {
+        const scriptKeys = Object.keys(files || {})
+          .filter((k) => /^scriptFile\d+$/.test(k))
+          .sort((a, b) => parseInt(a.replace('scriptFile', ''), 10) - parseInt(b.replace('scriptFile', ''), 10));
+        for (const key of scriptKeys) {
+          const f = files?.[key]?.[0];
+          if (!f) continue;
+          extraScriptFiles.push({
+            filename: f.originalname,
+            path: f.path,
+            size: f.size,
+          });
+        }
+        if (extraScriptFiles.length > 0) {
+          await scriptService.addExtraScriptFiles(id, extraScriptFiles);
+        }
+      }
+
+      // 4. 处理新上传的辅助文件
       const auxFiles = this.collectAuxFiles(files);
       if (auxFiles.length > 0) {
         await scriptService.addAuxiliaryFiles(id, auxFiles);
-      }
-
-      // 更新元数据
-      const updateData = isMultipart
-        ? this.parseMultipartMetadata(body)
-        : body;
-      if (updateData && Object.keys(updateData).length > 0) {
-        await scriptService.updateScript(id, updateData);
       }
 
       const updatedScript = await scriptService.getScript(id);
@@ -267,7 +322,7 @@ export class ScriptRoutes {
         code: 400,
         data: null,
         message: '脚本更新失败',
-        error: error.message,
+        error: safeErrorMessage(error),
       };
 
       res.status(400).json(response);
@@ -322,6 +377,12 @@ export class ScriptRoutes {
     if (body.templateRequired !== undefined) data.templateRequired = body.templateRequired === 'true';
     if (body.templateIds) data.templateIds = JSON.parse(body.templateIds);
     if (body.requirements) data.requirements = JSON.parse(body.requirements);
+    if (body.pythonVersion) data.pythonVersion = body.pythonVersion;
+    if (body.isMultiFile !== undefined) data.isMultiFile = body.isMultiFile === 'true';
+    if (body.entryName) data.entryName = body.entryName;
+    if (body.existingExtra) {
+      data.extraFiles = JSON.parse(body.existingExtra);
+    }
     if (body.existingAux) {
       data.auxiliaryFiles = JSON.parse(body.existingAux);
     }
@@ -352,7 +413,38 @@ export class ScriptRoutes {
         code: 400,
         data: null,
         message: '脚本删除失败',
-        error: error.message,
+        error: safeErrorMessage(error),
+      };
+
+      res.status(400).json(response);
+    }
+  }
+
+  /**
+   * 清空多文件模式下的脚本文件
+   * 
+   * @param req - Express请求对象
+   * @param res - Express响应对象
+   */
+  private async clearScriptFiles(req: Request, res: Response): Promise<void> {
+    try {
+      const id = req.params.id as string;
+
+      await scriptService.clearScriptFiles(id);
+
+      const response: ApiResponse<{ success: boolean }> = {
+        code: 200,
+        data: { success: true },
+        message: '脚本文件已清空',
+      };
+
+      res.status(200).json(response);
+    } catch (error: any) {
+      const response: ApiResponse<null> = {
+        code: 400,
+        data: null,
+        message: '清空脚本文件失败',
+        error: safeErrorMessage(error),
       };
 
       res.status(400).json(response);
@@ -383,7 +475,7 @@ export class ScriptRoutes {
         code: 400,
         data: null,
         message: '获取脚本内容失败',
-        error: error.message,
+        error: safeErrorMessage(error),
       };
 
       res.status(400).json(response);
@@ -415,7 +507,7 @@ export class ScriptRoutes {
         code: 400,
         data: null,
         message: '脚本内容更新失败',
-        error: error.message,
+        error: safeErrorMessage(error),
       };
 
       res.status(400).json(response);
@@ -460,7 +552,7 @@ export class ScriptRoutes {
       // 如果SSE头已经发送，通过SSE发送错误（包含status字段让前端可更新状态）
       if (res.headersSent) {
         res.write(
-          `event: error\ndata: ${JSON.stringify({ error: error.message, status: 'failed' })}\n\n`
+          `event: error\ndata: ${JSON.stringify({ error: safeErrorMessage(error), status: 'failed' })}\n\n`
         );
         res.end();
       } else {
@@ -468,7 +560,7 @@ export class ScriptRoutes {
           code: 400,
           data: null,
           message: '安装依赖失败',
-          error: error.message,
+          error: safeErrorMessage(error),
         };
         res.status(400).json(response);
       }
@@ -507,7 +599,7 @@ export class ScriptRoutes {
         code: 400,
         data: null,
         message: '下载脚本失败',
-        error: error.message,
+        error: safeErrorMessage(error),
       };
       res.status(400).json(response);
     }

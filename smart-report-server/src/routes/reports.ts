@@ -8,10 +8,22 @@
  */
 
 import { Router, Request, Response } from 'express';
+import { createReadStream } from 'fs';
 import { reportService } from '../services/reportService';
+import { fileDedupService } from '../services/fileDedupService';
+import { getLogger } from '../utils/logger';
 import { authenticate, authorize } from '../middleware/auth';
-import { uploadReportInputFiles } from '../middleware/upload';
-import { ApiResponse } from '../types';
+import { uploadReportInputFiles, uploadArchiveFile } from '../middleware/upload';
+import { ApiResponse, safeErrorMessage } from '../types';
+import { execFile, execSync } from 'child_process';
+import { promisify } from 'util';
+import path from 'path';
+import fs from 'fs';
+import { randomUUID } from 'crypto';
+
+const execFileAsync = promisify(execFile);
+
+const log = getLogger('ReportRoutes', 'core');
 
 /**
  * 报告路由类
@@ -40,6 +52,9 @@ export class ReportRoutes {
     // 生成报告（需要认证，SSE流式返回日志，需要 multer 处理 multipart/form-data）
     this.router.post('/generate', authenticate, uploadReportInputFiles, this.generateReport.bind(this));
 
+    // 解压压缩包（步骤：上传文件后下一步时调用，需要认证）
+    this.router.post('/extract-archive', authenticate, uploadArchiveFile, this.extractArchive.bind(this));
+
     // 删除报告（需要认证）
     this.router.delete('/:id', authenticate, this.deleteReport.bind(this));
 
@@ -62,6 +77,9 @@ export class ReportRoutes {
       authenticate,
       this.downloadAllReports.bind(this)
     );
+
+    // 保存 AI 分析报告（需要认证）
+    this.router.post('/ai-save', authenticate, this.saveAIAnalysisReport.bind(this));
   }
 
   /**
@@ -72,11 +90,12 @@ export class ReportRoutes {
    */
   private async getReports(req: Request, res: Response): Promise<void> {
     try {
-      const { status, generatedBy } = req.query;
+      const { status, generatedBy, reportSource } = req.query;
 
       const reports = await reportService.getReports({
         status: status as string,
         generatedBy: generatedBy as string,
+        reportSource: reportSource as string,
       });
 
       const response: ApiResponse<{ reports: typeof reports }> = {
@@ -91,7 +110,7 @@ export class ReportRoutes {
         code: 500,
         data: null,
         message: '获取报告列表失败',
-        error: error.message,
+        error: safeErrorMessage(error),
       };
 
       res.status(500).json(response);
@@ -120,7 +139,7 @@ export class ReportRoutes {
       };
       res.status(200).json(response);
     } catch (error: any) {
-      res.status(500).json({ code: 500, data: null, message: '获取报告失败', error: error.message } as ApiResponse<null>);
+      res.status(500).json({ code: 500, data: null, message: '获取报告失败', error: safeErrorMessage(error) } as ApiResponse<null>);
     }
   }
 
@@ -137,32 +156,33 @@ export class ReportRoutes {
         | { [fieldname: string]: Express.Multer.File[] }
         | undefined;
 
-      // 准备输入文件（按 inputFile0, inputFile1... 顺序收集）
-      const inputFiles: Array<{
-        filename: string;
-        path: string;
-        size: number;
-      }> = [];
-      if (files) {
-        const inputKeys = Object.keys(files)
-          .filter((key) => /^inputFile\d+$/.test(key))
-          .sort((a, b) => {
-            const idxA = parseInt(a.replace('inputFile', ''), 10);
-            const idxB = parseInt(b.replace('inputFile', ''), 10);
-            return idxA - idxB;
-          });
+      // 秒传引用：{ 索引: hash }，命中文件不上传、从去重存储解析
+      const dedupRefs: Record<string, string> = body.dedupRefs ? JSON.parse(body.dedupRefs) : {};
 
-        for (const key of inputKeys) {
-          const inputFile = files[key]?.[0];
-          if (inputFile) {
-            inputFiles.push({
-              filename: inputFile.originalname,
-              path: inputFile.path,
-              size: inputFile.size,
-            });
-          }
+      // 按索引合并「新上传文件」与「秒传引用文件」，保证与 inputHashes 严格对齐
+      const byIndex = new Map<number, { filename: string; path: string; size: number }>();
+      if (files) {
+        for (const key of Object.keys(files)) {
+          const m = /^inputFile(\d+)$/.exec(key);
+          if (!m) continue;
+          const f = files[key]?.[0];
+          if (f) byIndex.set(parseInt(m[1], 10), { filename: f.originalname, path: f.path, size: f.size });
         }
       }
+      const dedupIndexes: number[] = [];
+      for (const [idxStr, hash] of Object.entries(dedupRefs)) {
+        const idx = parseInt(idxStr, 10);
+        if (!Number.isInteger(idx) || typeof hash !== 'string') continue;
+        const entry = await fileDedupService.lookup(hash.toLowerCase());
+        if (!entry) {
+          res.status(400).json({ code: 400, data: null, message: `文件索引 ${idx} 的秒传引用已过期，请重新上传该文件` } as ApiResponse<null>);
+          return;
+        }
+        await fileDedupService.touch(hash.toLowerCase());
+        byIndex.set(idx, { filename: entry.fileName, path: entry.path, size: entry.size });
+        dedupIndexes.push(idx);
+      }
+      const inputFiles = [...byIndex.entries()].sort((a, b) => a[0] - b[0]).map(([, v]) => v);
 
       // 启动后台生成任务，立即获取 reportId 和 EventEmitter
       const { reportId, emitter } = await reportService.startBackgroundGeneration({
@@ -190,6 +210,14 @@ export class ReportRoutes {
       // 订阅 EventEmitter 事件 → SSE
       const onLog = (msg: string) => sendSSE('log', { message: msg });
       const onComplete = (data: any) => {
+        // 生成成功：把新上传的临时文件收编进内容寻址存储（失败不阻塞，留待散落清理）
+        const uploadedPaths = [...byIndex.entries()]
+          .filter(([idx]) => !dedupIndexes.includes(idx))
+          .map(([, v]) => v);
+        for (const f of uploadedPaths) {
+          fileDedupService.register(f.path, f.filename, req.user!.userId)
+            .catch((e) => log.warn(`输入文件收编失败: ${f.filename}: ${e?.message || e}`));
+        }
         sendSSE('complete', data);
         safeEnd();
       };
@@ -226,7 +254,7 @@ export class ReportRoutes {
           code: 400,
           data: null,
           message: '生成报告失败',
-          error: error.message,
+          error: safeErrorMessage(error),
         };
         res.status(400).json(response);
       }
@@ -257,7 +285,7 @@ export class ReportRoutes {
         code: 400,
         data: null,
         message: '报告删除失败',
-        error: error.message,
+        error: safeErrorMessage(error),
       };
 
       res.status(400).json(response);
@@ -288,10 +316,54 @@ export class ReportRoutes {
         code: 400,
         data: null,
         message: '获取报告日志失败',
-        error: error.message,
+        error: safeErrorMessage(error),
       };
 
       res.status(400).json(response);
+    }
+  }
+
+  /**
+   * 保存 AI 智能分析报告
+   * 
+   * @param req - Express请求对象
+   * @param res - Express响应对象
+   */
+  private async saveAIAnalysisReport(req: Request, res: Response): Promise<void> {
+    try {
+      const { content, originalFileName, category, author } = req.body;
+      const generatedBy = req.user?.userId || 'unknown';
+
+      if (!content || !originalFileName) {
+        res.status(400).json({
+          code: 400, data: null,
+          message: '缺少必要参数（content, originalFileName）',
+        } as ApiResponse<null>);
+        return;
+      }
+
+      const report = await reportService.saveAIAnalysisReport({
+        content: content as string,
+        originalFileName: originalFileName as string,
+        category: (category as string) || 'other',
+        author: (author as string) || generatedBy,
+        generatedBy,
+      });
+
+      const response: ApiResponse<{ report: typeof report }> = {
+        code: 200,
+        data: { report },
+        message: 'AI分析报告保存成功',
+      };
+      res.status(200).json(response);
+    } catch (error: any) {
+      const response: ApiResponse<null> = {
+        code: 500,
+        data: null,
+        message: '保存AI分析报告失败',
+        error: safeErrorMessage(error),
+      };
+      res.status(500).json(response);
     }
   }
 
@@ -319,7 +391,7 @@ export class ReportRoutes {
         code: 400,
         data: null,
         message: '获取报告文件列表失败',
-        error: error.message,
+        error: safeErrorMessage(error),
       };
 
       res.status(400).json(response);
@@ -342,16 +414,16 @@ export class ReportRoutes {
         fileIndex ? parseInt(fileIndex) : undefined
       );
 
-      // 设置下载响应头
+      // 设置下载响应头：同时提供 ASCII fallback 和 RFC 5987 UTF-8 编码，防止中文乱码
+      const encodedName = encodeURIComponent(fileInfo.fileName).replace(/'/g, "%27");
+      const asciiFallback = fileInfo.fileName.replace(/[^\x20-\x7E]/g, '?').replace(/"/g, '');
       res.writeHead(200, {
         'Content-Type': 'application/octet-stream',
-        'Content-Disposition': `attachment; filename="${encodeURIComponent(
-          fileInfo.fileName
-        )}"`,
+        'Content-Disposition': `attachment; filename="${asciiFallback || 'report'}"; filename*=UTF-8''${encodedName}`,
       });
 
       // 创建文件读取流并发送
-      const fileStream = require('fs').createReadStream(fileInfo.filePath);
+      const fileStream = createReadStream(fileInfo.filePath);
       fileStream.pipe(res);
     } catch (error: any) {
       if (!res.headersSent) {
@@ -359,7 +431,7 @@ export class ReportRoutes {
           code: 400,
           data: null,
           message: '下载报告失败',
-          error: error.message,
+          error: safeErrorMessage(error),
         };
         res.status(400).json(response);
       }
@@ -379,11 +451,11 @@ export class ReportRoutes {
       const archiveInfo = await reportService.downloadAllReports(id);
 
       // 设置下载响应头
+      const encodedName = encodeURIComponent(archiveInfo.fileName).replace(/'/g, "%27");
+      const asciiFallback = archiveInfo.fileName.replace(/[^\x20-\x7E]/g, '?').replace(/"/g, '');
       res.writeHead(200, {
         'Content-Type': 'application/gzip',
-        'Content-Disposition': `attachment; filename="${encodeURIComponent(
-          archiveInfo.fileName
-        )}"`,
+        'Content-Disposition': `attachment; filename="${asciiFallback || 'reports.tar.gz'}"; filename*=UTF-8''${encodedName}`,
         'Content-Length': String(archiveInfo.fileSize),
       });
 
@@ -396,16 +468,181 @@ export class ReportRoutes {
       });
       fileStream.pipe(res);
     } catch (error: any) {
-      console.error(`批量下载报告失败 (reportId=${req.params.id}): ${error.message}`, error.stack);
+      console.error(`批量下载报告失败 (reportId=${req.params.id}): ${safeErrorMessage(error)}`, error.stack);
       if (!res.headersSent) {
         const response: ApiResponse<null> = {
           code: 400,
           data: null,
           message: '批量下载报告失败',
-          error: error.message,
+          error: safeErrorMessage(error),
         };
         res.status(400).json(response);
       }
+    }
+  }
+
+  /**
+   * 解压压缩包 — 用户上传压缩包点击下一步时调用
+   * 
+   * 接收 multipart/form-data:
+   *   - file: 压缩包文件
+   *   - password?: 解压密码（可选）
+   * 
+   * 返回:
+   *   { success: true, files: [{name, path, size}], totalSize }
+   *   { success: false, needPassword: true, error: "..." }
+   *   { success: false, error: "...", errorDetail: "..." }
+   */
+  private async extractArchive(req: Request, res: Response): Promise<void> {
+    try {
+      const file = req.file;
+      if (!file) {
+        res.status(400).json({ code: 400, data: null, message: '请上传压缩包文件' } satisfies ApiResponse<null>);
+        return;
+      }
+
+      const password = (req.body as any)?.password as string | undefined;
+      const archivePath = file.path;
+
+      // 检测压缩包类型
+      const lowerName = file.originalname.toLowerCase();
+      const isArchive = /\.(zip|tar|tar\.gz|tgz)$/i.test(lowerName);
+      if (!isArchive) {
+        // 不是压缩包，直接返回成功（无需解压）
+        res.status(200).json({
+          code: 200,
+          data: {
+            success: true,
+            needExtract: false,
+            files: [{
+              name: file.originalname,
+              originalPath: archivePath,
+              size: file.size,
+            }],
+          },
+          message: '非压缩包文件，无需解压',
+        } satisfies ApiResponse<any>);
+        return;
+      }
+
+      // 创建临时解压目录
+      const extractDir = path.join(path.dirname(archivePath), `_extracted_${randomUUID().slice(0, 8)}`);
+      fs.mkdirSync(extractDir, { recursive: true });
+
+      // 查找 Python 解释器
+      const pythonPath = findPythonForExtract();
+      if (!pythonPath) {
+        res.status(500).json({
+          code: 500,
+          data: null,
+          message: '未找到可用的 Python 环境，无法解压压缩包',
+        } satisfies ApiResponse<null>);
+        return;
+      }
+
+      // 查找解压脚本
+      const scriptPath = path.resolve(process.cwd(), 'scripts', 'extract_archive.py');
+      if (!fs.existsSync(scriptPath)) {
+        res.status(500).json({
+          code: 500,
+          data: null,
+          message: `解压脚本未找到: ${scriptPath}`,
+        } satisfies ApiResponse<null>);
+        return;
+      }
+
+      // 构建命令行参数
+      const args = [scriptPath, archivePath, extractDir];
+      if (password) {
+        args.push('--password', password);
+      }
+
+      // 执行解压
+      const { stdout, stderr } = await execFileAsync(pythonPath, args, {
+        timeout: 30000,
+        maxBuffer: 10 * 1024 * 1024,
+        windowsHide: true,
+      });
+
+      // 解析 Python 脚本输出
+      let result: any;
+      try {
+        result = JSON.parse(stdout.trim());
+      } catch {
+        // JSON 解析失败，返回 stderr 作为错误详情
+        res.status(500).json({
+          code: 500,
+          data: {
+            success: false,
+            error: '解压脚本输出解析失败',
+            errorDetail: stderr || stdout.slice(0, 500),
+          },
+          message: '解压失败：脚本输出格式错误',
+        } satisfies ApiResponse<any>);
+        return;
+      }
+
+      if (!result.success) {
+        // 需要密码
+        if (result.errorCode === 'NEED_PASSWORD') {
+          res.status(200).json({
+            code: 200,
+            data: {
+              success: false,
+              needPassword: true,
+              error: result.error,
+              archivePath,
+            },
+            message: '压缩包需要密码',
+          } satisfies ApiResponse<any>);
+          return;
+        }
+
+        // 其他错误
+        res.status(200).json({
+          code: 200,
+          data: {
+            success: false,
+            error: result.error || '解压失败',
+            errorDetail: result.errorDetail || '',
+            errorCode: result.errorCode || 'EXTRACTION_ERROR',
+            archivePath,
+          },
+          message: result.error || '解压失败',
+        } satisfies ApiResponse<any>);
+        return;
+      }
+
+      // 解压成功 — 返回文件列表
+      const files = (result.files || []).map((f: string) => ({
+        name: f,
+        path: path.join(extractDir, f),
+        size: 0, // 文件大小由 Python 脚本返回的 total_size 总合
+      }));
+
+      // 同时记录解压后的原始目录路径，供后续步骤引用
+      res.status(200).json({
+        code: 200,
+        data: {
+          success: true,
+          needExtract: true,
+          files,
+          totalSize: result.total_size || 0,
+          extractDir,
+        },
+        message: `解压成功，共 ${files.length} 个文件`,
+      } satisfies ApiResponse<any>);
+    } catch (error: any) {
+      const errorDetail = safeErrorMessage(error);
+      res.status(500).json({
+        code: 500,
+        data: {
+          success: false,
+          error: '解压过程异常',
+          errorDetail,
+        },
+        message: errorDetail,
+      } satisfies ApiResponse<any>);
     }
   }
 
@@ -423,3 +660,25 @@ export class ReportRoutes {
  * 报告路由单例实例
  */
 export const reportRoutes = new ReportRoutes();
+
+/**
+ * 查找可用的 Python 解释器
+ * 优先级: 项目内嵌 Python > 系统 Python
+ */
+function findPythonForExtract(): string | null {
+  const candidates = [
+    path.resolve(process.cwd(), 'data', 'python-embedded', 'python.exe'),
+    path.resolve(process.cwd(), 'data', 'python-embedded', 'python'),
+  ];
+  for (const p of candidates) {
+    if (fs.existsSync(p)) return p;
+  }
+  // 降级：尝试系统 Python
+  try {
+    execSync('python3 --version 2>nul || python --version 2>nul', { timeout: 3000, windowsHide: true });
+    return 'python';
+  } catch {
+    // ignore
+  }
+  return null;
+}

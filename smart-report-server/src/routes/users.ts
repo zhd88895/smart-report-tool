@@ -19,7 +19,7 @@ import {
   clearAuthCookies,
 } from '../middleware/auth';
 import { sessionService } from '../services/sessionService';
-import { ApiResponse } from '../types';
+import { ApiResponse, safeErrorMessage } from '../types';
 import { getLogger } from '../utils/logger';
 
 const log = getLogger('UserRoutes', 'other');
@@ -44,6 +44,9 @@ export class UserRoutes {
 
     // 获取当前登录用户
     this.router.get('/me', authenticate, this.getCurrentUser.bind(this));
+
+    // 会话心跳（authenticate 内已完成滑动续期，成功返回 204 无 body）
+    this.router.post('/heartbeat', authenticate, this.heartbeat.bind(this));
 
     // 获取用户列表（需要认证）
     this.router.get('/', authenticate, this.getUsers.bind(this));
@@ -81,7 +84,7 @@ export class UserRoutes {
       };
       res.status(201).json(response);
     } catch (error: any) {
-      res.status(400).json({ code: 400, data: null, message: '用户注册失败', error: error.message });
+      res.status(400).json({ code: 400, data: null, message: '用户注册失败', error: safeErrorMessage(error) });
     }
   }
 
@@ -112,8 +115,8 @@ export class UserRoutes {
 
       res.status(200).json(response);
     } catch (error: any) {
-      log.warn(`登录失败: ${error.message}`);
-      res.status(401).json({ code: 401, data: null, message: '登录失败', error: error.message });
+      log.warn(`登录失败: ${safeErrorMessage(error)}`);
+      res.status(401).json({ code: 401, data: null, message: '登录失败', error: safeErrorMessage(error) });
     }
   }
 
@@ -161,8 +164,18 @@ export class UserRoutes {
         message: '获取成功',
       });
     } catch (error: any) {
-      res.status(500).json({ code: 500, data: null, message: '获取用户信息失败', error: error.message });
+      res.status(500).json({ code: 500, data: null, message: '获取用户信息失败', error: safeErrorMessage(error) });
     }
+  }
+
+  /**
+   * 会话心跳
+   *
+   * authenticate 中间件已验证会话并对非持久会话执行滑动续期（touchSession），
+   * 此处直接返回 204 无 body，供前端用户活动监听节流调用。
+   */
+  private async heartbeat(_req: Request, res: Response): Promise<void> {
+    res.status(204).end();
   }
 
   /**
@@ -178,7 +191,7 @@ export class UserRoutes {
       });
       res.status(200).json({ code: 200, data: { users }, message: '获取用户列表成功' });
     } catch (error: any) {
-      res.status(500).json({ code: 500, data: null, message: '获取用户列表失败', error: error.message });
+      res.status(500).json({ code: 500, data: null, message: '获取用户列表失败', error: safeErrorMessage(error) });
     }
   }
 
@@ -190,7 +203,7 @@ export class UserRoutes {
       await userService.deleteUser(req.params.id as string);
       res.status(200).json({ code: 200, data: { success: true }, message: '用户删除成功' });
     } catch (error: any) {
-      res.status(400).json({ code: 400, data: null, message: '用户删除失败', error: error.message });
+      res.status(400).json({ code: 400, data: null, message: '用户删除失败', error: safeErrorMessage(error) });
     }
   }
 
@@ -202,7 +215,7 @@ export class UserRoutes {
       const user = await userService.updateUserStatus(req.params.id as string, req.body.status);
       res.status(200).json({ code: 200, data: user, message: '用户状态更新成功' });
     } catch (error: any) {
-      res.status(400).json({ code: 400, data: null, message: '用户状态更新失败', error: error.message });
+      res.status(400).json({ code: 400, data: null, message: '用户状态更新失败', error: safeErrorMessage(error) });
     }
   }
 
@@ -214,7 +227,7 @@ export class UserRoutes {
       const user = await userService.updateUserRole(req.params.id as string, req.body.role);
       res.status(200).json({ code: 200, data: user, message: '用户角色更新成功' });
     } catch (error: any) {
-      res.status(400).json({ code: 400, data: null, message: '用户角色更新失败', error: error.message });
+      res.status(400).json({ code: 400, data: null, message: '用户角色更新失败', error: safeErrorMessage(error) });
     }
   }
 
@@ -235,7 +248,7 @@ export class UserRoutes {
       const user = await userService.updateProfile(id, { displayName, region }, currentUser?.role === 'admin');
       res.status(200).json({ code: 200, data: user, message: '个人资料更新成功' });
     } catch (error: any) {
-      res.status(400).json({ code: 400, data: null, message: '个人资料更新失败', error: error.message });
+      res.status(400).json({ code: 400, data: null, message: '个人资料更新失败', error: safeErrorMessage(error) });
     }
   }
 
@@ -252,7 +265,7 @@ export class UserRoutes {
       await userService.changePassword(userId, currentPassword, newPassword);
       res.status(200).json({ code: 200, data: { success: true }, message: '密码修改成功' });
     } catch (error: any) {
-      res.status(400).json({ code: 400, data: null, message: '密码修改失败', error: error.message });
+      res.status(400).json({ code: 400, data: null, message: '密码修改失败', error: safeErrorMessage(error) });
     }
   }
 
@@ -264,7 +277,7 @@ export class UserRoutes {
       await userService.adminResetPassword(req.params.id as string, req.body.newPassword);
       res.status(200).json({ code: 200, data: { success: true }, message: '密码重置成功' });
     } catch (error: any) {
-      res.status(400).json({ code: 400, data: null, message: '密码重置失败', error: error.message });
+      res.status(400).json({ code: 400, data: null, message: '密码重置失败', error: safeErrorMessage(error) });
     }
   }
 

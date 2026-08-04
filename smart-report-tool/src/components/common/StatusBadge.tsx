@@ -17,5 +17,5 @@ export function StatusBadge({ status }: StatusBadgeProps) {
     failed: '失败',
   };
 
-  return <Badge variant={variants[status] || 'outline'}>{labels[status] || status}</Badge>;
+  return <Badge variant={variants[status] || 'outline'} className="whitespace-nowrap shrink-0">{labels[status] || status}</Badge>;
 }

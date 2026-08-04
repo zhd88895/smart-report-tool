@@ -16,6 +16,10 @@ interface FileUploaderProps {
   triggerMode?: 'immediate' | 'manual';
   /** When true, preserve directory structure via webkitRelativePath (folder picker + directory drag) */
   preserveDir?: boolean;
+  /** When true, the file list section is hidden (the parent renders the list itself, e.g. with an entry selector) */
+  hideFileList?: boolean;
+  /** Custom slot for the file list. Receives the files + removeFile handler. */
+  renderFileList?: (params: { files: File[]; removeFile: (i: number) => void }) => React.ReactNode;
 }
 
 /** Helper: get display path for a file — uses webkitRelativePath if available, else name */
@@ -71,6 +75,8 @@ export function FileUploader({
   maxSizeMB,
   triggerMode = 'immediate',
   preserveDir = false,
+  hideFileList = false,
+  renderFileList,
 }: FileUploaderProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [localFiles, setLocalFiles] = useState<File[]>(files || []);
@@ -86,23 +92,32 @@ export function FileUploader({
   onFilesChangeRef.current = onFilesChange;
   onFilesSelectedRef.current = onFilesSelected;
 
+  // 标记外部主动清空
+  const isExternalReset = useRef(false);
+
   // Sync local files when external files prop resets
   useEffect(() => {
     if (files !== undefined && files.length === 0) {
+      isExternalReset.current = true;
       setLocalFiles([]);
+    } else if (files !== undefined && files.length > 0) {
+      isExternalReset.current = false;
     }
   }, [files]);
 
-  // 标记是否首次挂载，避免初始空数组触发 onFilesChange 导致父组件立即卸载
+  // 标记是否首次挂载
   const isInitialMount = useRef(true);
 
   // Sync local files to parent
   useEffect(() => {
-    // 首次挂载时不触发 onFilesChange，避免 triggerMode="manual" 时因空数组导致父组件卸载
     if (isInitialMount.current) {
       isInitialMount.current = false;
       return;
     }
+    if (isExternalReset.current && localFiles.length === 0) {
+      return;
+    }
+    isExternalReset.current = false;
     onFilesChangeRef.current?.(localFiles);
     if (triggerMode === 'immediate') {
       onFilesSelectedRef.current?.(localFiles);
@@ -215,7 +230,9 @@ export function FileUploader({
         </div>
       </div>
 
-      {displayFiles.length > 0 && (
+      {renderFileList ? (
+        renderFileList({ files: displayFiles, removeFile })
+      ) : !hideFileList && displayFiles.length > 0 ? (
         <div className="space-y-2">
           {displayFiles.map((file, index) => {
             const filePath = getFilePath(file);
@@ -236,7 +253,7 @@ export function FileUploader({
             );
           })}
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

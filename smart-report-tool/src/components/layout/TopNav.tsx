@@ -4,6 +4,7 @@ import { LogOut, Settings } from 'lucide-react';
 import { useAuthStore } from '@/stores/authStore';
 import { useUIStore } from '@/stores/uiStore';
 import { ROUTES } from '@/constants/routes';
+import { SIDEBAR_WIDTH_COLLAPSED, SIDEBAR_WIDTH_EXPANDED } from '@/constants/layout';
 import { ROLE_LABELS } from '@/constants/roles';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
@@ -32,7 +33,7 @@ export function TopNav() {
 
   return (
     <header className="fixed top-0 right-0 z-40 h-16 border-b bg-card px-4 flex items-center justify-between transition-all duration-300"
-      style={{ left: sidebarCollapsed ? '64px' : '240px' }}
+      style={{ left: sidebarCollapsed ? SIDEBAR_WIDTH_COLLAPSED : SIDEBAR_WIDTH_EXPANDED }}
     >
       <div className="flex items-center gap-2">
         <h1 className="text-lg font-semibold text-foreground">智能报告生成工具</h1>

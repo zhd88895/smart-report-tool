@@ -12,9 +12,9 @@ import { templateRepository } from '../db/repositories';
 import { fileManager, safeMoveFile } from '../utils/file';
 import { authenticate, authorize } from '../middleware/auth';
 import { uploadTemplateFile } from '../middleware/upload';
-import { ApiResponse } from '../types';
+import { ApiResponse, safeErrorMessage } from '../types';
 import fs from 'fs/promises';
-import { existsSync, mkdirSync } from 'fs';
+import { existsSync, mkdirSync, createReadStream } from 'fs';
 import path from 'path';
 import { TEMPLATES_DIR } from '../config';
 
@@ -85,7 +85,7 @@ export class TemplateRoutes {
         code: 500,
         data: null,
         message: '获取模板列表失败',
-        error: error.message,
+        error: safeErrorMessage(error),
       };
 
       res.status(500).json(response);
@@ -171,7 +171,7 @@ export class TemplateRoutes {
         code: 400,
         data: null,
         message: '模板上传失败',
-        error: error.message,
+        error: safeErrorMessage(error),
       };
 
       res.status(400).json(response);
@@ -223,7 +223,7 @@ export class TemplateRoutes {
         code: 400,
         data: null,
         message: '模板更新失败',
-        error: error.message,
+        error: safeErrorMessage(error),
       };
 
       res.status(400).json(response);
@@ -267,7 +267,7 @@ export class TemplateRoutes {
         code: 400,
         data: null,
         message: '模板删除失败',
-        error: error.message,
+        error: safeErrorMessage(error),
       };
 
       res.status(400).json(response);
@@ -317,7 +317,7 @@ export class TemplateRoutes {
       });
 
       // 创建文件读取流并发送
-      const fileStream = require('fs').createReadStream(template.filePath);
+      const fileStream = createReadStream(template.filePath);
       fileStream.pipe(res);
     } catch (error: any) {
       if (!res.headersSent) {
@@ -325,7 +325,7 @@ export class TemplateRoutes {
           code: 500,
           data: null,
           message: '下载模板失败',
-          error: error.message,
+          error: safeErrorMessage(error),
         };
         res.status(500).json(response);
       }

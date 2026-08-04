@@ -7,7 +7,9 @@
  */
 
 import { getAsync, allAsync, runAsync, withTransaction } from '../database';
-import type { Script, AuxiliaryFile } from '../../services/scriptService';
+import type { Script, AuxiliaryFile, ExtraFile } from '../../services/scriptService';
+import { toAbsolutePath, toRelativePath } from '../../config';
+import { safeJsonParse } from '../../utils/json';
 
 function rowToScript(row: any): Script {
   return {
@@ -21,30 +23,24 @@ function rowToScript(row: any): Script {
     version: row.version || '1.0',
     category: row.category || 'host',
     fileName: row.file_name,
-    filePath: row.file_path,
+    filePath: toAbsolutePath(row.file_path),
     fileHash: row.file_hash || '',
     fileSize: row.file_size || 0,
     templateRequired: Boolean(row.template_required),
     templateIds: safeJsonParse<string[]>(row.template_ids, []),
     auxiliaryFiles: [],
+    extraFiles: [],
     requirements: safeJsonParse<string[]>(row.requirements, []),
     depsStatus: safeJsonParse(row.deps_status, {
       status: 'none',
       log: '',
       packages: [],
     }),
+    pythonVersion: row.python_version || 'embedded',
+    isMultiFile: Boolean(row.is_multi_file),
     uploadedAt: row.uploaded_at,
     uploadedBy: row.uploaded_by || 'unknown',
   };
-}
-
-function safeJsonParse<T>(value: string | null | undefined, defaultValue: T): T {
-  if (!value) return defaultValue;
-  try {
-    return JSON.parse(value) as T;
-  } catch {
-    return defaultValue;
-  }
 }
 
 function scriptToRow(script: Script): any[] {
@@ -59,13 +55,15 @@ function scriptToRow(script: Script): any[] {
     script.version || '1.0',
     script.category || 'host',
     script.fileName,
-    script.filePath,
+    toRelativePath(script.filePath),
     script.fileHash || '',
     script.fileSize || 0,
     script.templateRequired ? 1 : 0,
     JSON.stringify(script.templateIds || []),
     JSON.stringify(script.requirements || []),
     JSON.stringify(script.depsStatus || { status: 'none', log: '', packages: [] }),
+    script.pythonVersion || 'embedded',
+    script.isMultiFile ? 1 : 0,
     script.uploadedAt,
     script.uploadedBy || 'unknown',
   ];
@@ -95,6 +93,7 @@ export const scriptRepository = {
     const scripts = rows.map(rowToScript);
     for (const script of scripts) {
       script.auxiliaryFiles = await this.findAuxiliaryFiles(script.id);
+      script.extraFiles = await this.findExtraFiles(script.id);
     }
     return scripts;
   },
@@ -104,6 +103,7 @@ export const scriptRepository = {
     if (!row) return null;
     const script = rowToScript(row);
     script.auxiliaryFiles = await this.findAuxiliaryFiles(id);
+    script.extraFiles = await this.findExtraFiles(id);
     return script;
   },
 
@@ -112,8 +112,8 @@ export const scriptRepository = {
       `INSERT INTO scripts (
         id, name, description, script_type, region, input_formats, input_format_manual,
         version, category, file_name, file_path, file_hash, file_size, template_required,
-        template_ids, requirements, deps_status, uploaded_at, uploaded_by
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        template_ids, requirements, deps_status, python_version, is_multi_file, uploaded_at, uploaded_by
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       scriptToRow(script)
     );
 
@@ -139,6 +139,8 @@ export const scriptRepository = {
       templateIds: 'template_ids',
       requirements: 'requirements',
       depsStatus: 'deps_status',
+      pythonVersion: 'python_version',
+      isMultiFile: 'is_multi_file',
     };
 
     const fields: string[] = [];
@@ -172,7 +174,7 @@ export const scriptRepository = {
   async updateFileInfo(id: string, data: { fileName: string; filePath: string; fileHash: string; fileSize: number }): Promise<void> {
     await runAsync(
       'UPDATE scripts SET file_name = ?, file_path = ?, file_hash = ?, file_size = ? WHERE id = ?',
-      [data.fileName, data.filePath, data.fileHash, data.fileSize, id]
+      [data.fileName, toRelativePath(data.filePath), data.fileHash, data.fileSize, id]
     );
   },
 
@@ -185,7 +187,7 @@ export const scriptRepository = {
     return rows.map((row) => ({
       name: row.name,
       size: row.size,
-      path: row.path,
+      path: toAbsolutePath(row.path),
       hash: row.hash || '',
     }));
   },
@@ -193,11 +195,47 @@ export const scriptRepository = {
   async createAuxiliaryFile(scriptId: string, aux: AuxiliaryFile): Promise<void> {
     await runAsync(
       'INSERT INTO script_auxiliary_files (script_id, name, size, path, hash) VALUES (?, ?, ?, ?, ?)',
-      [scriptId, aux.name, aux.size, aux.path, aux.hash || '']
+      [scriptId, aux.name, aux.size, toRelativePath(aux.path), aux.hash || '']
     );
   },
 
   async clearAuxiliaryFiles(scriptId: string): Promise<void> {
     await runAsync('DELETE FROM script_auxiliary_files WHERE script_id = ?', [scriptId]);
+  },
+
+  async findExtraFiles(scriptId: string): Promise<ExtraFile[]> {
+    const rows = await allAsync('SELECT * FROM script_extra_files WHERE script_id = ? ORDER BY name', [scriptId]);
+    return rows.map((row) => ({
+      name: row.name,
+      size: row.size || 0,
+      path: toAbsolutePath(row.path),
+      hash: row.hash || '',
+    }));
+  },
+
+  async createExtraFile(scriptId: string, file: ExtraFile): Promise<void> {
+    await runAsync(
+      'INSERT INTO script_extra_files (script_id, name, size, path, hash) VALUES (?, ?, ?, ?, ?)',
+      [scriptId, file.name, file.size, toRelativePath(file.path), file.hash || '']
+    );
+  },
+
+  async updateExtraFile(scriptId: string, name: string, file: Partial<ExtraFile>): Promise<void> {
+    const fields: string[] = [];
+    const values: any[] = [];
+    if (file.size !== undefined) { fields.push('size = ?'); values.push(file.size); }
+    if (file.path !== undefined) { fields.push('path = ?'); values.push(toRelativePath(file.path)); }
+    if (file.hash !== undefined) { fields.push('hash = ?'); values.push(file.hash); }
+    if (fields.length === 0) return;
+    values.push(scriptId, name);
+    await runAsync(`UPDATE script_extra_files SET ${fields.join(', ')} WHERE script_id = ? AND name = ?`, values);
+  },
+
+  async deleteExtraFile(scriptId: string, name: string): Promise<void> {
+    await runAsync('DELETE FROM script_extra_files WHERE script_id = ? AND name = ?', [scriptId, name]);
+  },
+
+  async clearExtraFiles(scriptId: string): Promise<void> {
+    await runAsync('DELETE FROM script_extra_files WHERE script_id = ?', [scriptId]);
   },
 };

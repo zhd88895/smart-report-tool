@@ -17,9 +17,31 @@ import {
   register as authRegister,
   checkAuthStatus,
 } from '@/services/authService';
+import { useConversationStore } from './conversationStore';
+import { getApiUrl } from '@/services/api';
 
-// 空闲超时时间（毫秒）
-const IDLE_TIMEOUT_MS = 25 * 60 * 1000; // 25 分钟（略小于后端 30 分钟）
+// 空闲超时时间默认值（毫秒）：后端会话超时默认 30 分钟，前端略早 1 分钟登出
+const DEFAULT_IDLE_TIMEOUT_MS = 29 * 60 * 1000;
+
+// 当前生效的空闲超时（毫秒），登录/初始化时从 /api/public-config 同步
+let idleTimeoutMs = DEFAULT_IDLE_TIMEOUT_MS;
+
+/**
+ * 从后端公开配置同步会话超时设置（系统设置页 system.sessionTimeout），
+ * 前端空闲登出比后端早 1 分钟，保证用户先收到友好的登出跳转
+ */
+async function refreshIdleTimeout(): Promise<void> {
+  try {
+    const res = await fetch(getApiUrl('/public-config'), { credentials: 'include' });
+    if (!res.ok) return;
+    const minutes = Number((await res.json())?.data?.sessionTimeoutMinutes);
+    if (Number.isFinite(minutes) && minutes > 1) {
+      idleTimeoutMs = Math.floor((minutes - 1) * 60 * 1000);
+    }
+  } catch {
+    // 后端不可达时保持默认值
+  }
+}
 
 // 活动检测间隔
 const ACTIVITY_CHECK_INTERVAL_MS = 60 * 1000; // 1 分钟
@@ -44,7 +66,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     const result = await authLogin(username, password, rememberMe);
     if (result.user) {
       set({ user: result.user, isAuthenticated: true, isLoading: false });
-      // 登录成功后初始化空闲检测
+      // 登录新账号时清空上一个账号的对话状态
+      useConversationStore.getState().resetConversations();
+      // 登录成功后初始化空闲检测（并同步服务端会话超时设置）
+      refreshIdleTimeout();
       startIdleDetection();
       return { success: true };
     }
@@ -55,6 +80,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     // 调用后端 API 销毁会话
     await authLogout();
     set({ user: null, isAuthenticated: false, isLoading: false });
+    // 清空当前账号的对话状态
+    useConversationStore.getState().resetConversations();
     // 停止空闲检测
     stopIdleDetection();
   },
@@ -68,6 +95,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         logout();
       } else {
         set({ user: null, isAuthenticated: false, isLoading: false });
+        useConversationStore.getState().resetConversations();
       }
     };
 
@@ -107,6 +135,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     window.addEventListener('keydown', onUserActivity);
     window.addEventListener('touchstart', onUserActivity);
     window.addEventListener('scroll', onUserActivity);
+
+    // 同步服务端会话超时设置
+    refreshIdleTimeout();
   },
 
   register: async (username: string, password: string, displayName: string, region: string) => {
@@ -144,7 +175,7 @@ function startIdleDetection(): void {
   idleCheckTimer = setInterval(() => {
     const elapsed = Date.now() - lastActivityTime;
 
-    if (elapsed >= IDLE_TIMEOUT_MS) {
+    if (elapsed >= idleTimeoutMs) {
       // 空闲超时，自动登出
       console.warn('[Auth] 长时间无操作，自动登出');
       stopIdleDetection();
@@ -153,6 +184,7 @@ function startIdleDetection(): void {
       authLogout().then(() => {
         localStorage.removeItem('smart_report_current_user');
         useAuthStore.setState({ user: null, isAuthenticated: false, isLoading: false });
+        useConversationStore.getState().resetConversations();
         // 触发 401 事件让页面跳转到登录
         window.dispatchEvent(new CustomEvent('auth:unauthorized'));
       });

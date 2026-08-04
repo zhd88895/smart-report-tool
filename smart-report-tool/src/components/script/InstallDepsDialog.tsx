@@ -1,3 +1,4 @@
+import { useRef, useEffect } from 'react';
 import { Loader2, Check, AlertCircle, Terminal } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -11,6 +12,11 @@ export interface InstallDepsDialogProps {
 }
 
 export function InstallDepsDialog({ open, onOpenChange, installStatus, installLogs }: InstallDepsDialogProps) {
+  const logEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [installLogs]);
   return (
     <Dialog open={open} onOpenChange={(open) => { if (!open) onOpenChange(false); }}>
       <DialogContent className="max-w-lg max-h-[70vh] flex flex-col">
@@ -32,6 +38,7 @@ export function InstallDepsDialog({ open, onOpenChange, installStatus, installLo
           {installLogs.map((line, i) => (
             <div key={i} className="whitespace-pre-wrap break-all">{line}</div>
           ))}
+          <div ref={logEndRef} />
         </div>
         <DialogFooter>
           <Button onClick={() => onOpenChange(false)}>

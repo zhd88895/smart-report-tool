@@ -193,15 +193,22 @@ export class SessionService {
   }
 
   /**
-   * 将会话标记为正在活动（更新 last_activity_at）
+   * 将会话标记为正在活动（滑动过期续期）
+   *
+   * 仅当会话剩余有效期不足 sessionExpiryMinutes 的一半时才顺延 expires_at，
+   * 避免每次请求都写库；连续无操作超过 sessionExpiryMinutes 仍会过期。
    */
   async touchSession(sessionId: string, sessionExpiryMinutes: number = 30): Promise<void> {
-    const now = new Date().toISOString();
-    const newExpiry = new Date(Date.now() + sessionExpiryMinutes * 60 * 1000).toISOString();
+    const nowMs = Date.now();
+    const now = new Date(nowMs).toISOString();
+    const newExpiry = new Date(nowMs + sessionExpiryMinutes * 60 * 1000).toISOString();
+    // 剩余有效期 = expires_at - now；不足一半（expires_at < now + 1/2 周期）才续期
+    const renewThreshold = new Date(nowMs + (sessionExpiryMinutes / 2) * 60 * 1000).toISOString();
 
     await runAsync(
-      `UPDATE sessions SET last_activity_at = ?, expires_at = ? WHERE id = ? AND is_persistent = 0`,
-      [now, newExpiry, sessionId]
+      `UPDATE sessions SET last_activity_at = ?, expires_at = ?
+       WHERE id = ? AND is_persistent = 0 AND (expires_at IS NULL OR (expires_at < ? AND expires_at > ?))`,
+      [now, newExpiry, sessionId, renewThreshold, now]
     );
   }
 

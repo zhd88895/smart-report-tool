@@ -7,6 +7,7 @@
  */
 
 import { getAsync, allAsync, runAsync } from '../database';
+import { toAbsolutePath, toRelativePath } from '../../config';
 
 export interface TemplateRecord {
   id: string;
@@ -28,7 +29,7 @@ function rowToTemplate(row: any): TemplateRecord {
     description: row.description || '',
     fileType: row.file_type || '',
     fileName: row.file_name,
-    filePath: row.file_path,
+    filePath: toAbsolutePath(row.file_path),
     fileSize: row.file_size || 0,
     compatibleScriptType: row.compatible_script_type || 'python',
     uploadedAt: row.uploaded_at,
@@ -57,7 +58,7 @@ export const templateRepository = {
         template.description || '',
         template.fileType,
         template.fileName,
-        template.filePath,
+        toRelativePath(template.filePath),
         template.fileSize || 0,
         template.compatibleScriptType || 'python',
         template.uploadedAt,

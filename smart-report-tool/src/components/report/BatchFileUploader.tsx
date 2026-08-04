@@ -4,6 +4,7 @@ import { cn } from '@/lib/utils';
 import { formatFileSize } from '@/utils/formatters';
 import { InputFileEntry } from '@/types';
 import { detectArchiveType, extractArchive, ArchiveEntry } from '@/utils/archive';
+import { checkFileHashes } from '@/services/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -170,9 +171,20 @@ export function BatchFileUploader({
 
     // Compute SHA-256 hash in Web Worker (zero main-thread blocking)
     computeFileHash(file).then((fileHash) => {
+      if (!fileHash) return;
       updateFiles((prev) =>
         prev.map((f) => (f.id === id ? { ...f, hash: fileHash } : f))
       );
+      // 秒传预检查：服务端去重存储已有同内容文件则标记（压缩包不参与）
+      if (!isArchive) {
+        checkFileHashes([fileHash]).then((existing) => {
+          if (existing[fileHash]) {
+            updateFiles((prev) =>
+              prev.map((f) => (f.id === id ? { ...f, dedup: true } : f))
+            );
+          }
+        });
+      }
     }).catch(() => {});
 
     if (isArchive) {
@@ -373,6 +385,9 @@ export function BatchFileUploader({
                     </div>
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
+                    {file.dedup && (
+                      <Badge variant="secondary" className="text-[10px]">⚡秒传</Badge>
+                    )}
                     {file.status === 'done' && (
                       <Badge variant="outline" className="text-green-600 border-green-200">
                         完成

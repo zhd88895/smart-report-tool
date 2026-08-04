@@ -119,7 +119,9 @@ export function useLogPersistence(sessionId: string) {
     scheduleSave(pendingLogsRef.current, status);
   }, [scheduleSave]);
 
-  // 添加单条日志
+  // 添加单条日志（用 ref 避免闭包过时）
+  const addLogRef = useRef<(message: string) => void>(() => {});
+
   const addLog = useCallback((message: string) => {
     const timestamp = new Date().toLocaleTimeString('zh-CN');
     const line = `[${timestamp}] ${message}`;
@@ -129,6 +131,11 @@ export function useLogPersistence(sessionId: string) {
       return newLogs;
     });
   }, [persistLogs]);
+
+  // 始终保持 ref 指向最新的 addLog
+  useEffect(() => {
+    addLogRef.current = addLog;
+  }, [addLog]);
 
   // 批量添加日志（推荐用于 SSE 流式输入）
   const addLogs = useCallback((messages: string[]) => {
@@ -187,6 +194,7 @@ export function useLogPersistence(sessionId: string) {
     logs,
     isRestored,
     addLog,
+    addLogRef,  // 暴露 ref 用于 SSE 回调等长生命周期场景
     addLogs,
     setLogLines,
     clearLogs,

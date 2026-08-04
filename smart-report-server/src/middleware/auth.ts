@@ -15,10 +15,20 @@
 import { Request, Response, NextFunction } from 'express';
 import { getConfig } from '../config';
 import { sessionService } from '../services/sessionService';
+import { settingsService } from '../services/settingsService';
 import { ApiResponse } from '../types';
 import { getLogger } from '../utils/logger';
 
 const log = getLogger('AuthMiddleware', 'other');
+
+/**
+ * 当前生效的会话空闲超时（分钟）：
+ * 优先取系统设置 system.sessionTimeout（管理员可在系统设置页调整，即时生效），
+ * 未配置时回退到环境变量 SESSION_EXPIRY_MINUTES。
+ */
+function getSessionTimeoutMinutes(): number {
+  return settingsService.getNumber('system.sessionTimeout', getConfig().SESSION_EXPIRY_MINUTES);
+}
 
 // ═══════════════════════════════════════════════════════
 //  类型定义
@@ -121,7 +131,7 @@ export async function authenticate(
 
     // 更新非持久会话的活动时间（空闲超时续期）
     if (!session.isPersistent) {
-      await sessionService.touchSession(sid, config.SESSION_EXPIRY_MINUTES);
+      await sessionService.touchSession(sid, getSessionTimeoutMinutes());
     }
 
     // 注入用户信息到请求
@@ -167,7 +177,7 @@ export async function createLoginSession(
     username,
     role,
     rememberMe ? null : config.SERVER_INSTANCE_ID,
-    rememberMe ? undefined : config.SESSION_EXPIRY_MINUTES
+    rememberMe ? undefined : getSessionTimeoutMinutes()
   );
 
   if (rememberMe) {
@@ -186,8 +196,19 @@ export async function createLoginSession(
  * 清除所有认证 Cookie
  */
 export function clearAuthCookies(res: Response): void {
-  res.clearCookie(COOKIE_NAME, { path: '/' });
-  res.clearCookie(REMEMBER_COOKIE_NAME, { path: '/' });
+  const isProduction = process.env.NODE_ENV === 'production';
+  res.clearCookie(COOKIE_NAME, {
+    path: '/',
+    httpOnly: true,
+    secure: isProduction,
+    sameSite: isProduction ? 'strict' as const : 'lax' as const,
+  });
+  res.clearCookie(REMEMBER_COOKIE_NAME, {
+    path: '/',
+    httpOnly: true,
+    secure: isProduction,
+    sameSite: isProduction ? 'strict' as const : 'lax' as const,
+  });
 }
 
 // ═══════════════════════════════════════════════════════
