@@ -56,6 +56,18 @@ export class SettingsRoutes {
         return;
       }
 
+      // 扩展名类设置：自动补全开头的点（用户可省略不输）
+      const EXTENSION_KEYS = new Set(['storage.archiveExtensions', 'storage.textExtensions']);
+      for (const u of updates) {
+        if (EXTENSION_KEYS.has(u.key) && typeof u.value === 'string') {
+          u.value = u.value.split(',')
+            .map((s) => s.trim())
+            .filter((s) => s.length > 0)
+            .map((s) => (s.startsWith('.') ? s : `.${s}`))
+            .join(',');
+        }
+      }
+
       await settingsService.updateSettings(
         updates,
         req.user.userId,
