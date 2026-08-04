@@ -63,6 +63,7 @@ export function AppLayout() {
       <div className="flex flex-col flex-1 min-w-0">
         <TopNav />
         <main
+          id="app-main-scroll"
           className="flex-1 overflow-auto p-6 pt-20"
           style={{
             marginLeft: sidebarCollapsed ? SIDEBAR_WIDTH_COLLAPSED : SIDEBAR_WIDTH_EXPANDED,

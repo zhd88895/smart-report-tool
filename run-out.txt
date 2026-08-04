@@ -1,0 +1,23 @@
+
+====================================================
+       Smart Report Tool v0.4.0
+====================================================
+  Backend:  http://localhost:3001
+  Frontend: http://localhost:5173
+====================================================
+
+[START] Starting backend service...
+[WAIT] Waiting for backend to be ready...
+[OK] Backend is ready.
+[START] Starting frontend service...
+[WAIT] Waiting for frontend to be ready...
+
+[DONE] All services are up:
+  Backend:  http://localhost:3001
+  Frontend: http://localhost:5173
+
+Opening browser...
+
+Tip: run stop.bat to stop all services.
+timeout: invalid time interval '/t'
+Try 'timeout --help' for more information.

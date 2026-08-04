@@ -81,6 +81,8 @@ export function AIAnalysisPanel() {
   // 结果区自动滚动：流式输出时跟随到最新内容；用户手动上翻时暂停跟随，回到底部附近后恢复
   const resultScrollRef = useRef<HTMLDivElement>(null);
   const userScrolledUpRef = useRef(false);
+  // 页面级自动滚动：流式输出时整个网页同步滚到底部；用户上翻页面时暂停，回到底部附近恢复
+  const pageFollowRef = useRef(true);
   const [showPromptEditor, setShowPromptEditor] = useState(false);
   const [showSupplementForm, setShowSupplementForm] = useState(false);
   const [showKnowledgePicker, setShowKnowledgePicker] = useState(false);
@@ -150,6 +152,25 @@ export function AIAnalysisPanel() {
     el.scrollTop = el.scrollHeight;
   }, [streamingText, result]);
 
+  // 页面级跟随：主内容区（#app-main-scroll）滚动时，用户上翻离开底部则暂停，回到距底部 120px 内恢复
+  useEffect(() => {
+    const sc = document.getElementById('app-main-scroll');
+    if (!sc) return;
+    const onScroll = () => {
+      pageFollowRef.current = sc.scrollHeight - sc.scrollTop - sc.clientHeight < 120;
+    };
+    sc.addEventListener('scroll', onScroll, { passive: true });
+    return () => sc.removeEventListener('scroll', onScroll);
+  }, []);
+
+  // 流式输出时主内容区同步滚到底部，保证最新内容始终可见（完成时最后定位一次）
+  useEffect(() => {
+    if (!pageFollowRef.current) return;
+    if (!analyzing && !result) return;
+    const sc = document.getElementById('app-main-scroll');
+    if (sc) sc.scrollTop = sc.scrollHeight;
+  }, [streamingText, result, analyzing]);
+
   // 用户手动滚动：离开底部则暂停跟随，回到距底部 60px 内恢复跟随
   const handleResultScroll = (e: React.UIEvent<HTMLDivElement>) => {
     const el = e.currentTarget;
@@ -160,6 +181,7 @@ export function AIAnalysisPanel() {
     if (!selectedFile || analyzing) return;
     setAnalyzing(true); setResult(null); setStreamingText(''); setError(null);
     userScrolledUpRef.current = false; // 新一轮分析恢复自动跟随滚动
+    pageFollowRef.current = true;      // 页面级跟随同步恢复
     try {
       // 秒传判定：完整计算文件 SHA-256，命中去重存储则不再上传
       let dedupHash = '';
