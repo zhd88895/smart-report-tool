@@ -316,7 +316,7 @@ export default function DashboardPage() {
                   <div
                     key={conv.id}
                     className="flex cursor-pointer items-center justify-between gap-3 rounded-md border p-3 transition-colors hover:bg-accent"
-                    onClick={() => navigate(ROUTES.ASSISTANT)}
+                    onClick={() => navigate(`${ROUTES.ASSISTANT}?id=${conv.id}`)}
                   >
                     <div className="flex min-w-0 items-center gap-3">
                       <MessageSquare className="h-4 w-4 shrink-0 text-primary" />

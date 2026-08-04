@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Send, Bot, User, Plus, Trash2, MessageSquare, Settings } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -39,6 +39,9 @@ export default function AssistantPage() {
   const [pendingBusy, setPendingBusy] = useState<Record<string, boolean>>({});
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  // 支持 ?id=<conversationId> 直达指定对话（如仪表盘「最近对话」跳转）
+  const [searchParams, setSearchParams] = useSearchParams();
+  const targetConversationId = searchParams.get('id');
 
   // 加载服务端解析后的 AI 配置（已有缓存时轻量刷新，同步设置页的变更）
   useEffect(() => {
@@ -55,9 +58,19 @@ export default function AssistantPage() {
     }
   }, [user, fetchConversations, resetConversations]);
 
+  // 对话选中：优先 ?id= 指定的对话（应用后即清除参数，避免覆盖后续手动切换）
   useEffect(() => {
-    if (!currentConversation && conversations.length > 0) setCurrentConversation(conversations[0]);
-  }, [conversations, currentConversation, setCurrentConversation]);
+    if (conversations.length === 0) return;
+    if (targetConversationId) {
+      const target = conversations.find((c) => c.id === targetConversationId);
+      if (target && currentConversation?.id !== target.id) {
+        setCurrentConversation(target);
+      }
+      setSearchParams({}, { replace: true });
+      return;
+    }
+    if (!currentConversation) setCurrentConversation(conversations[0]);
+  }, [conversations, currentConversation, targetConversationId, setCurrentConversation, setSearchParams]);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
