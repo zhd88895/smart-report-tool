@@ -524,7 +524,7 @@ export function AIAnalysisPanel() {
             selectedFile ? 'border-primary bg-primary/5' : 'border-muted-foreground/25 hover:border-primary/60 hover:bg-primary/[0.03]',
             analyzing && 'pointer-events-none opacity-50')}
             onClick={() => fileInputRef.current?.click()}>
-            <input ref={fileInputRef} type="file" className="hidden" accept={[...textExts, ...archiveExts].join(',')} onChange={handleFileChange} />
+            <input ref={fileInputRef} type="file" className="hidden" accept={inputMode === 'archive' ? archiveExts.join(',') : textExts.join(',')} onChange={handleFileChange} />
             {selectedFile ? (
               <div className="flex items-center justify-center gap-3">
                 {selectedFile.name.match(/\.(xlsx|xls)$/i) ? <FileSpreadsheet className="h-8 w-8 text-green-600" />
