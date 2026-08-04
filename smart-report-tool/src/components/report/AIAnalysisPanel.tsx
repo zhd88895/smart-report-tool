@@ -7,7 +7,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Upload, FileText, Bot, Download, Trash2, AlertTriangle, CheckCircle, Zap, Settings, ChevronDown, ChevronUp, FileSpreadsheet, Archive, Library } from 'lucide-react';
+import { Upload, FileText, Bot, Download, Trash2, AlertTriangle, CheckCircle, Zap, Settings, ChevronDown, ChevronUp, FileSpreadsheet, Archive } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -372,7 +372,8 @@ export function AIAnalysisPanel() {
           {/* 高级选项 */}
           <div className="space-y-1">
             <div className="text-sm font-medium text-muted-foreground pb-0.5">高级选项</div>
-          {/* 资产补充信息表单 */}
+          {/* 补充信息表单：主机/存储/交换机为「设备信息补充」，虚拟化/数据库为「信息补充」，「其他」类别不展示 */}
+          {category !== 'other' && (
           <div className="space-y-1.5">
             <button
               type="button"
@@ -380,7 +381,7 @@ export function AIAnalysisPanel() {
               onClick={() => setShowSupplementForm(!showSupplementForm)}
             >
               {showSupplementForm ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-              资产补充信息 {showSupplementForm ? '（点击收起）' : '（点击展开添加）'}
+              {category === 'virtualization' || category === 'database' ? '信息补充' : '设备信息补充'} {showSupplementForm ? '（点击收起）' : '（点击展开添加）'}
               {supplements.length > 0 && (
                 <Badge variant="secondary" className="text-[10px] h-4 px-1 ml-1">{supplements.length} 条</Badge>
               )}
@@ -394,6 +395,7 @@ export function AIAnalysisPanel() {
               />
             )}
           </div>
+          )}
 
           {/* 知识库文件选择器 */}
           <div className="space-y-1.5">
@@ -403,7 +405,6 @@ export function AIAnalysisPanel() {
               onClick={() => setShowKnowledgePicker(!showKnowledgePicker)}
             >
               {showKnowledgePicker ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-              <Library className="h-3 w-3" />
               知识库参考 {showKnowledgePicker ? '（点击收起）' : '（点击展开选择）'}
               {knowledgeFileIds.length > 0 && (
                 <Badge variant="secondary" className="text-[10px] h-4 px-1 ml-1">{knowledgeFileIds.length} 个文件</Badge>

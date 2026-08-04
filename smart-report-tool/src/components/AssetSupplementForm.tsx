@@ -58,8 +58,7 @@ const ASSET_CATEGORIES: Record<AssetType, { label: string; fields: Array<{ name:
     label: '虚拟化信息',
     fields: [
       { name: 'platform_manufacturer', label: '虚拟化平台厂家', type: 'text' },
-      { name: 'system_version', label: '虚拟化系统版本', type: 'text' },
-      { name: 'rvtools_data', label: 'RVTools数据（粘贴输出）', type: 'textarea' },
+      { name: 'system_version', label: '虚拟化版本信息', type: 'text' },
     ]
   },
   network: {
@@ -74,7 +73,6 @@ const ASSET_CATEGORIES: Record<AssetType, { label: string; fields: Array<{ name:
     label: '数据库信息',
     fields: [
       { name: 'manufacturer', label: '数据库厂家', type: 'text' },
-      { name: 'model', label: '数据库型号', type: 'text' },
       { name: 'version', label: '数据库版本', type: 'text' },
     ]
   }
