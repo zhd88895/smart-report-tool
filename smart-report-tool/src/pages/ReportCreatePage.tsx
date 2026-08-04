@@ -54,6 +54,12 @@ export default function ReportCreatePage() {
   // AI 智能分析为默认模式；仅 ?mode=script 显式回退到脚本模式（仅挂载时读取一次）
   const [useAI, setUseAI] = useState(() => searchParams.get('mode') !== 'script');
 
+  // 侧边栏「AI智能分析」与「脚本生成报告」共用本页面：
+  // 页面不卸载时（同路由切换）也要响应 URL 的 mode 参数变化
+  useEffect(() => {
+    setUseAI(searchParams.get('mode') !== 'script');
+  }, [searchParams]);
+
   // 压缩包解压状态
   const [extracting, setExtracting] = useState(false);
   const [extractProgress, setExtractProgress] = useState('');

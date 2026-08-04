@@ -2,7 +2,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard, FileText, ClipboardList, Download, Bot,
   Users, Settings, SlidersHorizontal, ChevronLeft, ChevronRight,
-  Database, Sparkles, MessageSquare,
+  Database, Sparkles, MessageSquare, FileSearch,
 } from 'lucide-react';
 import { useAuthStore } from '@/stores/authStore';
 import { useUIStore } from '@/stores/uiStore';
@@ -19,6 +19,10 @@ interface MenuItem {
   path: string;
   feature: FeatureKey;
   indent?: boolean;
+  /** 可选：覆盖 ROUTE_LABELS 的显示名（同一路由多个入口时使用） */
+  label?: string;
+  /** 可选：导航时附带的查询串（如 '?mode=script'） */
+  search?: string;
 }
 
 interface MenuGroup {
@@ -32,7 +36,7 @@ const menuGroups: MenuGroup[] = [
     title: 'AI 工作区',
     items: [
       { icon: Bot, path: ROUTES.ASSISTANT, feature: 'assistant' },
-      { icon: ClipboardList, path: ROUTES.REPORT_CREATE, feature: 'reportCreate' },
+      { icon: FileSearch, path: ROUTES.REPORT_CREATE, feature: 'reportCreate' },
       { icon: MessageSquare, path: ROUTES.CONVERSATIONS, feature: 'conversations' },
       { icon: Database, path: ROUTES.KNOWLEDGE_BASE, feature: 'settings' },
     ],
@@ -41,13 +45,15 @@ const menuGroups: MenuGroup[] = [
     title: '脚本与数据',
     items: [
       { icon: FileText, path: ROUTES.SCRIPTS, feature: 'scripts' },
+      // 与 AI智能分析共用 /report/create 页面，?mode=script 进入脚本模式
+      { icon: ClipboardList, path: ROUTES.REPORT_CREATE, search: '?mode=script', label: '脚本生成报告', feature: 'reportCreate' },
       { icon: Download, path: ROUTES.REPORTS, feature: 'reports' },
-      { icon: LayoutDashboard, path: ROUTES.DASHBOARD, feature: 'dashboard' },
     ],
   },
   {
     title: '系统',
     items: [
+      { icon: LayoutDashboard, path: ROUTES.DASHBOARD, feature: 'dashboard' },
       { icon: Users, path: ROUTES.USERS, feature: 'users' },
       { icon: SlidersHorizontal, path: ROUTES.SYSTEM_SETTINGS, feature: 'systemSettings' },
       { icon: Sparkles, path: ROUTES.AI_SETTINGS, feature: 'ai-settings', indent: true },
@@ -95,12 +101,19 @@ export function Sidebar() {
             )}
             <div className="space-y-1">
               {group.items.map((item) => {
-                const isActive = location.pathname === item.path;
-                const label = ROUTE_LABELS[item.path];
+                // 生成报告页有两个入口：AI智能分析（默认）与脚本生成报告（?mode=script），
+                // 高亮时需同时匹配路径与 mode 参数，避免两个菜单项同时点亮
+                const modeParam = new URLSearchParams(location.search).get('mode');
+                const isActive =
+                  item.path === ROUTES.REPORT_CREATE
+                    ? location.pathname === item.path &&
+                      (item.search ? modeParam === 'script' : modeParam !== 'script')
+                    : location.pathname === item.path;
+                const label = item.label ?? ROUTE_LABELS[item.path];
                 return (
                   <button
-                    key={item.path}
-                    onClick={() => navigate(item.path)}
+                    key={item.path + (item.search || '')}
+                    onClick={() => navigate(item.path + (item.search || ''))}
                     aria-label={label}
                     title={label}
                     className={cn(

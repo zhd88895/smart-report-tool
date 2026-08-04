@@ -17,7 +17,7 @@ export const ROUTES = {
 export const ROUTE_LABELS: Record<string, string> = {
   [ROUTES.DASHBOARD]: '仪表盘',
   [ROUTES.SCRIPTS]: '脚本及模板',
-  [ROUTES.REPORT_CREATE]: '生成报告',
+  [ROUTES.REPORT_CREATE]: 'AI智能分析',
   [ROUTES.REPORTS]: '报告管理',
   [ROUTES.ASSISTANT]: 'AI助手',
   [ROUTES.USERS]: '用户管理',

@@ -46,17 +46,17 @@ export default function DashboardPage() {
 
   const quickActions = [
     {
-      title: 'AI 分析巡检日志',
+      title: 'AI 智能分析',
       description: '上传日志，AI 自动分析并生成报告',
       icon: Sparkles,
       path: `${ROUTES.REPORT_CREATE}?mode=ai`,
       highlight: true,
     },
     {
-      title: '生成报告',
+      title: '脚本生成报告',
       description: '选择巡检脚本，生成标准报告',
       icon: FilePlus2,
-      path: ROUTES.REPORT_CREATE,
+      path: `${ROUTES.REPORT_CREATE}?mode=script`,
       highlight: false,
     },
     {
