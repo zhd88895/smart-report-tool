@@ -1,6 +1,5 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ConfirmDialog } from '@/components/common/ConfirmDialog';
 import { ReportFilterBar } from '@/components/reports/ReportFilterBar';
 import { ReportListTable } from '@/components/reports/ReportListTable';
@@ -30,6 +29,12 @@ export default function ReportsPage() {
   const [deleteTarget, setDeleteTarget] = useState<Report | null>(null);
   const [searchParams] = useSearchParams();
   const [activeTab, setActiveTab] = useState<string>(searchParams.get('tab') === 'ai' ? 'ai' : 'script'); // 'script' | 'ai'
+
+  // 侧边栏「AI报告」与「脚本报告」共用本页面（?tab=ai 区分），
+  // 页面不卸载时也要响应 URL 的 tab 参数变化
+  useEffect(() => {
+    setActiveTab(searchParams.get('tab') === 'ai' ? 'ai' : 'script');
+  }, [searchParams]);
   const [sortKey, setSortKey] = useState<string>('createdAt');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
   // 区域筛选
@@ -244,7 +249,7 @@ export default function ReportsPage() {
 
   return (
     <div className="space-y-6">
-      <h2 className="text-2xl font-bold tracking-tight">报告管理</h2>
+      <h2 className="text-2xl font-bold tracking-tight">{activeTab === 'ai' ? 'AI报告' : '脚本报告'}</h2>
 
       <ReportFilterBar
         searchQuery={searchQuery}
@@ -268,13 +273,7 @@ export default function ReportsPage() {
         onClearFilters={clearFilters}
       />
 
-      {/* Tab 切换：脚本生成 / AI生成 */}
-      <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList>
-          <TabsTrigger value="script">脚本生成</TabsTrigger>
-          <TabsTrigger value="ai">AI生成</TabsTrigger>
-        </TabsList>
-      </Tabs>
+      {/* 报告来源由侧边栏入口决定（AI报告 ?tab=ai / 脚本报告），页内不再提供切换 */}
 
       <ReportListTable
         reports={filteredReports}

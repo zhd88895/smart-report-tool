@@ -16,10 +16,9 @@ import { GeneratingResultCard } from '@/components/report/create/GeneratingResul
 import { OUTPUT_FORMAT_LABELS, LAST_NAME_KEY } from '@/components/report/create/constants';
 import { isDepsReady, getUnreadyDeps } from '@/components/report/create/scriptDeps';
 import { Button } from '@/components/ui/button';
-import { Switch } from '@/components/ui/switch';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { toast } from 'sonner';
-import { ChevronRight, CheckCircle, AlertCircle, X as XIcon, Sparkles } from 'lucide-react';
+import { ChevronRight, CheckCircle, AlertCircle, X as XIcon } from 'lucide-react';
 import { getRunningReportId, clearRunningReportId, pollReportLogs, pollReportStatus, apiExtractArchive } from '@/services/api';
 
 export default function ReportCreatePage() {
@@ -493,31 +492,6 @@ export default function ReportCreatePage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <h2 className="text-2xl font-bold tracking-tight">{pageTitle}</h2>
-        {/* AI 模式切换 - 突出显示为主要功能 */}
-        {useAI || generationState.step <= 1 ? (
-          <button
-            type="button"
-            onClick={() => { setUseAI(!useAI); if (!useAI) resetGenerationState(); }}
-            className={`flex items-center gap-3 rounded-lg border-2 px-4 py-2 transition-all ${
-              useAI
-                ? 'border-primary bg-primary/10 shadow-sm'
-                : 'border-dashed border-primary/40 hover:border-primary hover:bg-primary/5'
-            }`}
-          >
-            <div className={`flex h-8 w-8 items-center justify-center rounded-md ${useAI ? 'bg-primary text-primary-foreground' : 'bg-primary/10 text-primary'}`}>
-              <Sparkles className="h-4 w-4" />
-            </div>
-            <div className="text-left">
-              <div className={`text-sm font-semibold ${useAI ? 'text-primary' : 'text-foreground'}`}>
-                {useAI ? 'AI 智能分析模式' : '使用 AI 生成'}
-              </div>
-              <div className="text-xs text-muted-foreground">
-                {useAI ? '点击切换回脚本模式' : 'AI 自动分析巡检日志'}
-              </div>
-            </div>
-            <Switch checked={useAI} onCheckedChange={(v) => { setUseAI(v); if (v) resetGenerationState(); }} />
-          </button>
-        ) : null}
       </div>
 
       {useAI ? (

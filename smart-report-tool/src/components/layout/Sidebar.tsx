@@ -2,7 +2,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard, FileText, ClipboardList, Download, Bot,
   Users, Settings, SlidersHorizontal, ChevronLeft, ChevronRight,
-  Database, Sparkles, MessageSquare, FileSearch,
+  Database, Sparkles, MessageSquare, FileSearch, FileBarChart,
 } from 'lucide-react';
 import { useAuthStore } from '@/stores/authStore';
 import { useUIStore } from '@/stores/uiStore';
@@ -37,6 +37,8 @@ const menuGroups: MenuGroup[] = [
     items: [
       { icon: Bot, path: ROUTES.ASSISTANT, feature: 'assistant' },
       { icon: FileSearch, path: ROUTES.REPORT_CREATE, feature: 'reportCreate' },
+      // 与脚本报告共用 /reports 页面，?tab=ai 只看 AI 生成的报告
+      { icon: FileBarChart, path: ROUTES.REPORTS, search: '?tab=ai', label: 'AI报告', feature: 'reports' },
       { icon: MessageSquare, path: ROUTES.CONVERSATIONS, feature: 'conversations' },
       { icon: Database, path: ROUTES.KNOWLEDGE_BASE, feature: 'settings' },
     ],
@@ -47,7 +49,7 @@ const menuGroups: MenuGroup[] = [
       { icon: FileText, path: ROUTES.SCRIPTS, feature: 'scripts' },
       // 与 AI智能分析共用 /report/create 页面，?mode=script 进入脚本模式
       { icon: ClipboardList, path: ROUTES.REPORT_CREATE, search: '?mode=script', label: '脚本生成报告', feature: 'reportCreate' },
-      { icon: Download, path: ROUTES.REPORTS, feature: 'reports' },
+      { icon: Download, path: ROUTES.REPORTS, label: '脚本报告', feature: 'reports' },
     ],
   },
   {
@@ -101,14 +103,20 @@ export function Sidebar() {
             )}
             <div className="space-y-1">
               {group.items.map((item) => {
-                // 生成报告页有两个入口：AI智能分析（默认）与脚本生成报告（?mode=script），
-                // 高亮时需同时匹配路径与 mode 参数，避免两个菜单项同时点亮
+                // 两个页面都有双入口：生成报告页（?mode=script）与报告列表页（?tab=ai），
+                // 高亮时需同时匹配路径与对应参数，避免两个菜单项同时点亮
                 const modeParam = new URLSearchParams(location.search).get('mode');
-                const isActive =
-                  item.path === ROUTES.REPORT_CREATE
-                    ? location.pathname === item.path &&
-                      (item.search ? modeParam === 'script' : modeParam !== 'script')
-                    : location.pathname === item.path;
+                const tabParam = new URLSearchParams(location.search).get('tab');
+                const isActive = (() => {
+                  if (location.pathname !== item.path) return false;
+                  if (item.path === ROUTES.REPORT_CREATE) {
+                    return item.search ? modeParam === 'script' : modeParam !== 'script';
+                  }
+                  if (item.path === ROUTES.REPORTS) {
+                    return item.search ? tabParam === 'ai' : tabParam !== 'ai';
+                  }
+                  return true;
+                })();
                 const label = item.label ?? ROUTE_LABELS[item.path];
                 return (
                   <button
