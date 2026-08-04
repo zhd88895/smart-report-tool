@@ -94,24 +94,31 @@ async function parseFile(filePath: string, ext: string, originalName: string): P
         return { content: text };
       }
       case '.pdf': {
-        // PDF 需要外部库，尝试动态加载 pdf-parse
+        // pdf-parse v2 API：PDFParse 类 + getText()
         try {
-          const pdfParse = (await import('pdf-parse' as any)).default;
+          const mod: any = await import('pdf-parse' as any);
+          const PDFParse = mod.PDFParse ?? mod.default?.PDFParse ?? mod.default;
           const dataBuffer = await fs.readFile(filePath);
-          const data = await pdfParse(dataBuffer);
-          return { content: data.text || '' };
-        } catch {
-          return { content: '', error: 'PDF 解析需要安装 pdf-parse 库。当前已保存文件但无法提取文本内容。' };
+          const parser = new PDFParse({ data: dataBuffer });
+          try {
+            const result = await parser.getText();
+            return { content: result.text || '' };
+          } finally {
+            await parser.destroy().catch(() => {});
+          }
+        } catch (err: any) {
+          return { content: '', error: `PDF 解析失败: ${err.message}` };
         }
       }
       case '.docx': {
         // DOCX 需要外部库，尝试动态加载 mammoth
         try {
-          const mammoth = (await import('mammoth' as any)).default;
+          const mod: any = await import('mammoth' as any);
+          const mammoth = mod.default ?? mod;
           const result = await mammoth.extractRawText({ path: filePath });
           return { content: result.value || '' };
-        } catch {
-          return { content: '', error: 'DOCX 解析需要安装 mammoth 库。当前已保存文件但无法提取文本内容。' };
+        } catch (err: any) {
+          return { content: '', error: `DOCX 解析失败: ${err.message}` };
         }
       }
       case '.doc': {
@@ -292,6 +299,41 @@ router.post('/files/upload', authenticate, upload.single('file'), async (req: Re
   } catch (err: any) {
     log.error(`文件上传失败: ${err.message}`, traceId);
     res.status(500).json({ code: 500, data: null, message: '文件上传失败', error: err.message } as ApiResponse<null>);
+  }
+});
+
+// 重新解析文件（用于修复解析失败的文件，例如补装解析库后重试）
+router.post('/files/:id/reparse', authenticate, async (req: Request, res: Response) => {
+  const id = req.params.id as string;
+  const traceId = generateTraceId();
+  try {
+    const file = await knowledgeBaseRepository.findFileById(id);
+    if (!file) {
+      res.status(404).json({ code: 404, data: null, message: '文件不存在' } as ApiResponse<null>);
+      return;
+    }
+    if (!existsSync(file.file_path)) {
+      res.status(410).json({ code: 410, data: null, message: '原始文件已被清理，无法重新解析，请重新上传' } as ApiResponse<null>);
+      return;
+    }
+
+    log.info(`重新解析知识库文件: ${file.file_name} (${file.file_ext})`, traceId);
+    const { content, error } = await parseFile(file.file_path, file.file_ext, file.file_name);
+    const status = error ? 'error' : 'ready';
+    await knowledgeBaseRepository.updateFile(id, {
+      content,
+      content_length: content.length,
+      status,
+      error_message: error || null,
+    } as Partial<KBFile>);
+
+    const msg = error
+      ? `重新解析仍失败: ${error}`
+      : `重新解析成功，提取 ${content.length} 字符`;
+    res.json({ code: 200, data: { id, status, content_length: content.length, error_message: error || null }, message: msg } as ApiResponse<any>);
+  } catch (err: any) {
+    log.error(`重新解析失败: ${err.message}`, traceId);
+    res.status(500).json({ code: 500, data: null, message: '重新解析失败', error: err.message } as ApiResponse<null>);
   }
 });
 

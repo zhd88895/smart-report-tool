@@ -227,6 +227,25 @@ export default function KnowledgeBasePage() {
 
   const deleteFile = (file: KBFile) => setDeleteFileTarget(file);
 
+  /** 重新解析失败的文件（后端补装解析库后可一键重试） */
+  const [reparsingId, setReparsingId] = useState<string | null>(null);
+  const reparseFile = async (file: KBFile) => {
+    setReparsingId(file.id);
+    try {
+      const res = await fetch(`/api/knowledge-base/files/${file.id}/reparse`, {
+        method: 'POST', credentials: 'include',
+      });
+      const data = await res.json();
+      if (data.code === 200 && data.data?.status === 'ready') {
+        toast.success(data.message || '重新解析成功');
+      } else {
+        toast.error(data.message || '重新解析失败');
+      }
+      loadFiles();
+    } catch (e: any) { toast.error(`重新解析失败: ${e.message}`); }
+    finally { setReparsingId(null); }
+  };
+
   const confirmDeleteFile = async () => {
     const file = deleteFileTarget;
     if (!file) return;
@@ -384,6 +403,16 @@ export default function KnowledgeBasePage() {
                           {new Date(file.created_at).toLocaleDateString()}
                         </TableCell>
                         <TableCell className="text-right">
+                          {file.status === 'error' && (
+                            <Button
+                              variant="ghost" size="sm"
+                              title="重新解析"
+                              disabled={reparsingId === file.id}
+                              onClick={() => reparseFile(file)}
+                            >
+                              <RefreshCw className={cn('h-4 w-4 text-amber-600', reparsingId === file.id && 'animate-spin')} />
+                            </Button>
+                          )}
                           <Button variant="ghost" size="sm" onClick={() => deleteFile(file)}>
                             <Trash2 className="h-4 w-4 text-red-500" />
                           </Button>
