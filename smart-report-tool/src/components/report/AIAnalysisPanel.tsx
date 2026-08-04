@@ -29,7 +29,7 @@ import { cn } from '@/lib/utils';
 const CATEGORIES = [
   { key: 'host', label: '主机' },
   { key: 'storage', label: '存储' },
-  { key: 'network', label: '网络' },
+  { key: 'network', label: '交换机' },
   { key: 'virtualization', label: '虚拟化' },
   { key: 'database', label: '数据库' },
   { key: 'other', label: '其他' },

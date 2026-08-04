@@ -5,7 +5,7 @@ export const LOG_CATEGORIES: { value: LogCategory; label: string }[] = [
   { value: 'storage', label: '存储' },
   { value: 'database', label: '数据库' },
   { value: 'virtualization', label: '虚拟化' },
-  { value: 'network', label: '网络' },
+  { value: 'network', label: '交换机' },
 ];
 
 export const LOG_CATEGORY_LABELS: Record<LogCategory, string> = {
@@ -13,7 +13,7 @@ export const LOG_CATEGORY_LABELS: Record<LogCategory, string> = {
   storage: '存储',
   database: '数据库',
   virtualization: '虚拟化',
-  network: '网络',
+  network: '交换机',
 };
 
 export const LOG_CATEGORY_COLORS: Record<LogCategory, string> = {

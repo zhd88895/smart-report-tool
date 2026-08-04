@@ -62,7 +62,7 @@ const ASSET_CATEGORIES: Record<AssetType, { label: string; fields: Array<{ name:
     ]
   },
   network: {
-    label: '网络设备信息',
+    label: '交换机信息',
     fields: [
       { name: 'manufacturer', label: '交换机厂家', type: 'text' },
       { name: 'model', label: '交换机型号', type: 'text' },

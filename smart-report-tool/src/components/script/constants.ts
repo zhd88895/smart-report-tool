@@ -1,7 +1,7 @@
 import { ScriptType, ScriptRegion, LogCategory, AuxFile } from '@/types';
 
 export const SCRIPT_TYPE_LABELS: Record<ScriptType, string> = { python: 'Python', bat: 'BAT', ps1: 'PowerShell', sh: 'Shell', powershell: 'PowerShell 7' };
-export const LOG_CATEGORY_LABELS: Record<LogCategory, string> = { host: '主机', storage: '存储', database: '数据库', virtualization: '虚拟化', network: '网络' };
+export const LOG_CATEGORY_LABELS: Record<LogCategory, string> = { host: '主机', storage: '存储', database: '数据库', virtualization: '虚拟化', network: '交换机' };
 export const REGION_LIST: ScriptRegion[] = ['全部', '华南区', '西北区', '华东区', '东北区', '西南区', '华北区', '北京区', '华中区'];
 export const INPUT_FORMAT_SUGGESTIONS = ['doc', 'docx', 'xlsx', 'txt', 'log', 'html'];
 

@@ -5,7 +5,7 @@ export const CATEGORY_LABELS: Record<LogCategory, string> = {
   storage: '存储',
   database: '数据库',
   virtualization: '虚拟化',
-  network: '网络',
+  network: '交换机',
 };
 
 export const OUTPUT_FORMAT_LABELS: Record<OutputFormat, string> = {
