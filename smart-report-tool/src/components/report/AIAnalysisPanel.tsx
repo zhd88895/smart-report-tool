@@ -95,6 +95,11 @@ export function AIAnalysisPanel() {
   const [userHint, setUserHint] = useState('');
   const [showHintEditor, setShowHintEditor] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // 动态扩展名列表（从 /api/public-config 获取，与系统设置联动）
+  const [archiveExts, setArchiveExts] = useState<string[]>(['.zip', '.tar', '.gz', '.tgz', '.tar.gz', '.tar.bz2', '.tar.xz']);
+  const [textExts, setTextExts] = useState<string[]>(['.txt', '.log', '.conf', '.csv', '.xml', '.json', '.yml', '.yaml', '.out', '.err', '.md', '.xlsx', '.xls']);
+  // Agentic 分析进度消息（支持包智能分析模式）
+  const [packProgress, setPackProgress] = useState('');
 
   // 当前类别实际使用的提示词（自定义 > 默认）
   const currentPrompt = customPrompts[category] ?? DEFAULT_PROMPTS[category];
@@ -107,8 +112,25 @@ export function AIAnalysisPanel() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // 从后端公开配置同步扩展名列表（系统设置页可自定义）
+  useEffect(() => {
+    fetch(getApiUrl('/public-config'), { credentials: 'include' })
+      .then((r) => r.json())
+      .then((d) => {
+        if (Array.isArray(d?.data?.archiveExtensions) && d.data.archiveExtensions.length > 0) setArchiveExts(d.data.archiveExtensions);
+        if (Array.isArray(d?.data?.textExtensions) && d.data.textExtensions.length > 0) setTextExts(d.data.textExtensions);
+      })
+      .catch(() => { /* 保持默认值 */ });
+  }, []);
+
   /** 当前生效模型的展示名（用于报告内容） */
   const currentModelName = () => currentModel()?.displayName ?? '系统默认';
+
+  /** 文件名是否匹配压缩包扩展名（含复合扩展名如 .tar.gz） */
+  const isArchiveName = (name: string) => {
+    const lower = name.toLowerCase();
+    return archiveExts.some((ext) => lower.endsWith(ext));
+  };
 
   /** 切换输入模式：保存/恢复类别，清空不匹配模式的已选文件 */
   const switchInputMode = (mode: 'file' | 'archive') => {
@@ -116,10 +138,10 @@ export function AIAnalysisPanel() {
     if (mode === 'archive') {
       prevCategoryRef.current = category;
       setCategory('support');
-      if (selectedFile && !/\.(zip|tar|gz|tgz)$/i.test(selectedFile.name)) setSelectedFile(null);
+      if (selectedFile && !isArchiveName(selectedFile.name)) setSelectedFile(null);
     } else {
       setCategory(prevCategoryRef.current);
-      if (selectedFile && /\.(zip|tar|gz|tgz)$/i.test(selectedFile.name)) setSelectedFile(null);
+      if (selectedFile && isArchiveName(selectedFile.name)) setSelectedFile(null);
     }
     setInputMode(mode);
     setResult(null); setStreamingText(''); setError(null);
@@ -131,7 +153,7 @@ export function AIAnalysisPanel() {
       if (file.size > 50 * 1024 * 1024) { toast.error('文件不能超过 50MB'); return; }
       setSelectedFile(file); setResult(null); setStreamingText(''); setError(null);
       // 文件类型与模式不匹配时自动切换模式
-      const isArchive = /\.(zip|tar|gz|tgz)$/i.test(file.name);
+      const isArchive = isArchiveName(file.name);
       if (isArchive && inputMode === 'file') {
         prevCategoryRef.current = category;
         setCategory('support');
@@ -213,11 +235,19 @@ export function AIAnalysisPanel() {
       // 跨 read 循环的行缓冲：TCP 分片可能把一条 data: 行切断，
       // 只处理以 \n 结尾的完整行，不完整部分留给下一轮拼接（与 aiService.sendMessageStream 同款修法）
       let buffer = '';
-      /** 解析一行 SSE 数据（忽略空行 / [DONE] / 非 data 行） */
+      /** 解析一行 SSE 数据（忽略空行 / [DONE] / 非 data 行）；支持 pack_progress 进度消息和 fallback_notice */
       const handleLine = (line: string) => {
         const t = line.trim(); if (!t || !t.startsWith('data: ')) return;
         const dp = t.slice(6); if (dp === '[DONE]') return;
-        try { const delta = JSON.parse(dp).choices?.[0]?.delta?.content; if (delta) { fullText += delta; setStreamingText(fullText); } } catch { /* 忽略无法解析的行 */ }
+        try {
+          const parsed = JSON.parse(dp);
+          // Agentic 支持包分析的进度消息
+          if (parsed.type === 'pack_progress' && parsed.message) { setPackProgress(parsed.message); return; }
+          // Agentic 模式的 fallback 通知（无响应头，通过 SSE 传递）
+          if (parsed.type === 'fallback_notice') { useAIConfigStore.getState().setFallbackNotice(true); return; }
+          const delta = parsed.choices?.[0]?.delta?.content;
+          if (delta) { fullText += delta; setStreamingText(fullText); }
+        } catch { /* 忽略无法解析的行 */ }
       };
       try {
         while (true) {
@@ -231,7 +261,7 @@ export function AIAnalysisPanel() {
         // 流结束后若 buffer 还残留完整行，再处理一次
         if (buffer.trim()) handleLine(buffer);
       } finally { reader.releaseLock(); }
-      setResult(fullText); setStreamingText('');
+      setResult(fullText); setStreamingText(''); setPackProgress('');
       // 分析完成后自动保存到后端（保存与前端导出完全一致的内容和文件名）
       try {
         const reportContent = buildReportContent(fullText, category, selectedFile.name, currentModelName());
@@ -494,13 +524,13 @@ export function AIAnalysisPanel() {
             selectedFile ? 'border-primary bg-primary/5' : 'border-muted-foreground/25 hover:border-primary/60 hover:bg-primary/[0.03]',
             analyzing && 'pointer-events-none opacity-50')}
             onClick={() => fileInputRef.current?.click()}>
-            <input ref={fileInputRef} type="file" className="hidden" accept=".txt,.log,.conf,.csv,.xml,.json,.yml,.yaml,.out,.err,.md,.xlsx,.xls,.zip,.tar,.gz,.tgz" onChange={handleFileChange} />
+            <input ref={fileInputRef} type="file" className="hidden" accept={[...textExts, ...archiveExts].join(',')} onChange={handleFileChange} />
             {selectedFile ? (
               <div className="flex items-center justify-center gap-3">
                 {selectedFile.name.match(/\.(xlsx|xls)$/i) ? <FileSpreadsheet className="h-8 w-8 text-green-600" />
-                 : selectedFile.name.match(/\.(zip|tar|gz|tgz)$/i) ? <Archive className="h-8 w-8 text-amber-600" />
+                 : isArchiveName(selectedFile.name) ? <Archive className="h-8 w-8 text-amber-600" />
                  : <FileText className="h-8 w-8 text-primary" />}
-                {selectedFile.name.match(/\.(zip|tar|gz|tgz)$/i) && (
+                {isArchiveName(selectedFile.name) && (
                   <Badge variant="secondary" className="text-[10px]">整包智能分析</Badge>
                 )}
                 <div className="text-left"><p className="font-medium">{selectedFile.name}</p><p className="text-sm text-muted-foreground">{formatFileSize(selectedFile.size)}</p></div>
@@ -516,7 +546,7 @@ export function AIAnalysisPanel() {
                 </div>
                 <div>
                   <p className="text-sm font-medium text-foreground/80">{inputMode === 'archive' ? '点击上传支持包压缩包' : '点击上传巡检日志文件'}</p>
-                  <p className="text-xs text-muted-foreground/70 mt-1">{inputMode === 'archive' ? '支持 .zip .tar .tar.gz .tgz，最大 50MB，将自动拆包分析' : '支持 .txt .log .csv .xlsx .json 等，最大 50MB'}</p>
+                  <p className="text-xs text-muted-foreground/70 mt-1">{inputMode === 'archive' ? `支持 ${archiveExts.join(' ')}，最大 50MB，将自动拆包分析` : `支持 ${textExts.slice(0, 6).join(' ')} 等，最大 50MB`}</p>
                 </div>
               </div>
             )}
@@ -529,6 +559,13 @@ export function AIAnalysisPanel() {
             </Button>
             {result && <Button variant="outline" className="h-10" onClick={handleExport}><Download className="h-4 w-4 mr-2" />导出报告</Button>}
           </div>
+          {/* Agentic 支持包分析进度 */}
+          {analyzing && packProgress && (
+            <div className="flex items-center gap-2 rounded-md bg-primary/5 border border-primary/20 px-3 py-2 text-sm text-primary animate-pulse">
+              <Bot className="h-4 w-4 shrink-0" />
+              {packProgress}
+            </div>
+          )}
         </CardContent>
       </Card>
 

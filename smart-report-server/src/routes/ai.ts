@@ -26,6 +26,7 @@ import { executeRunScript, executeWriteScript } from '../services/aiTools/confir
 import { aiToolConfirmRepository } from '../db/repositories/aiToolConfirmRepository';
 import { userAIConfigService } from '../services/userAIConfigService';
 import { getPrompt, CATEGORY_KEYS } from '../services/aiPrompts';
+import { settingsService } from '../services/settingsService';
 import { getLogger } from '../utils/logger';
 
 const log = getLogger('AIRoutes', 'core');
@@ -162,9 +163,12 @@ export class AIRoutes {
     this.router.post('/tools/confirm', authenticate, this.confirmTool.bind(this));
     this.router.post('/tools/cancel', authenticate, this.cancelTool.bind(this));
 
-    // AI 文件分析（multipart upload，需要 multer）
-    const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
-    this.router.post('/analyze-file', authenticate, upload.single('file'), this.analyzeFile.bind(this));
+    // AI 文件分析（multipart upload，内存存储，限制从系统设置动态读取）
+    this.router.post('/analyze-file', authenticate, (req, res, next) => {
+      const limitMB = settingsService.getNumber('storage.uploadLimit', 50);
+      const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: limitMB * 1024 * 1024 } });
+      upload.single('file')(req, res, next);
+    }, this.analyzeFile.bind(this));
   }
 
   /** 非流式聊天：按当前登录用户的数据库配置统一调用；enableTools 时走工具循环 */
@@ -488,7 +492,13 @@ export class AIRoutes {
         return;
       }
 
-      // 读取文件内容：压缩包走解压+智能筛选，普通文件走文本/CLI 转换
+      // 用户补充提示（提前提取，快速/Agentic 两种路径共用）
+      const userHintRaw = (req.body as any)?.userHint;
+      const userHint = typeof userHintRaw === 'string' && userHintRaw.trim()
+        ? userHintRaw.trim().slice(0, 2000)
+        : undefined;
+
+      // 读取文件内容：压缩包走解压+智能筛选/Agentic，普通文件走文本/CLI 转换
       let content: string;
       if (isArchiveFile(fileName, fileBuffer)) {
         let entries;
@@ -499,6 +509,84 @@ export class AIRoutes {
           return;
         }
         const { context, summary } = smartSelect(entries);
+
+        // Agentic 分流：正则筛选无结果但有文本 / 预算装不下 / 文件数过多
+        const useAgentic = (summary.selected === 0 && summary.textFiles > 0)
+          || summary.skippedBudget > 0
+          || entries.length > 400;
+
+        if (useAgentic) {
+          // ── Agentic 路径：AI 自主选择文件读取 ──
+          log.info(`支持包 Agentic 分析: ${entries.length} 个文件, selected=${summary.selected}, skippedBudget=${summary.skippedBudget}, textFiles=${summary.textFiles}`);
+
+          // 构建知识库上下文（用文件路径做关键词提取）
+          let agentKnowledge = '';
+          if (knowledgeFileIds.length > 0) {
+            const { knowledgeBaseRepository } = await import('../db/repositories/knowledgeBaseRepository');
+            const kbFiles = await knowledgeBaseRepository.findFilesByIds(knowledgeFileIds);
+            if (kbFiles.length > 0) {
+              const pathText = entries.map((e: any) => e.path).join('\n');
+              const keywords = extractLogKeywords(pathText, fileName);
+              agentKnowledge = '\n\n## 知识库参考信息\n\n以下为用户从知识库中选取的参考文件（大型文档已按日志中的故障关键词自动节选相关章节）。分析时请主动将日志中的故障现象与参考文件中的对应章节关联，若找到对应的处理/更换/排查流程，请引用该章节给出完整、可操作的解决方法：\n\n';
+              for (const kf of kbFiles) {
+                const full = kf.content || '';
+                const { text, relevanceSelected } = selectRelevantExcerpt(full, keywords, KB_PER_FILE_BUDGET);
+                const note = relevanceSelected
+                  ? '（已按日志关键词节选相关章节）'
+                  : full.length > KB_PER_FILE_BUDGET
+                    ? '（内容较长，已截取开头部分）'
+                    : '';
+                agentKnowledge += `### ${kf.title} (${kf.file_name})${note}\n\n\`\`\`plaintext\n${text}\n\`\`\`\n\n---\n\n`;
+              }
+            }
+          }
+
+          // SSE 头
+          res.setHeader('Content-Type', 'text/event-stream');
+          res.setHeader('Cache-Control', 'no-cache');
+          res.setHeader('Connection', 'keep-alive');
+          res.setHeader('X-Accel-Buffering', 'no');
+          res.flushHeaders();
+
+          const sendProgress = (msg: string) => {
+            res.write(`data: ${JSON.stringify({ type: 'pack_progress', message: msg })}\n\n`);
+          };
+
+          sendProgress(`压缩包包含 ${entries.length} 个文件，启用智能分析模式...`);
+
+          try {
+            const { analyzeWithAgent } = await import('../services/supportPackAgentService');
+            const result = await analyzeWithAgent(req.user!.userId, entries, {
+              category, customPrompt, supplements,
+              knowledgeContext: agentKnowledge, userHint, modelId,
+              onProgress: sendProgress,
+            });
+
+            if (result.fallback) {
+              res.write(`data: ${JSON.stringify({ type: 'fallback_notice' })}\n\n`);
+            }
+
+            sendProgress('分析完成，正在生成报告...');
+
+            // 合成流式输出：按 ~200 字符切块，与正常流式格式一致
+            const CHUNK = 200;
+            for (let i = 0; i < result.report.length; i += CHUNK) {
+              const chunk = result.report.slice(i, i + CHUNK);
+              const sseData = JSON.stringify({ choices: [{ delta: { content: chunk } }] });
+              res.write(`data: ${sseData}\n\n`);
+            }
+
+            res.write('data: [DONE]\n\n');
+            res.end();
+          } catch (agentError: any) {
+            log.error(`Agentic 分析失败: ${safeErrorMessage(agentError)}`);
+            res.write(`event: error\ndata: ${JSON.stringify({ error: safeErrorMessage(agentError) })}\n\n`);
+            res.end();
+          }
+          return;
+        }
+
+        // 快速路径：智能筛选成功
         if (summary.selected === 0) {
           res.status(400).json({ code: 400, data: null, message: '压缩包内未找到可分析的文本日志' } satisfies ApiResponse<null>);
           return;
@@ -532,11 +620,9 @@ export class AIRoutes {
 
       let prompt = getPrompt(category, content + knowledgeContext, customPrompt, supplements);
 
-      // 用户补充提示：作为背景信息追加到提示词末尾（限 2000 字符，静默截断）
-      const userHintRaw = (req.body as any)?.userHint;
-      if (typeof userHintRaw === 'string' && userHintRaw.trim()) {
-        const hint = userHintRaw.trim().slice(0, 2000);
-        prompt += `\n\n## 用户补充提示\n用户提供了以下背景信息，请在分析时重点关注：\n${hint}`;
+      // 用户补充提示：追加到提示词末尾（userHint 已在上方统一提取）
+      if (userHint) {
+        prompt += `\n\n## 用户补充提示\n用户提供了以下背景信息，请在分析时重点关注：\n${userHint}`;
       }
 
       // 先调用统一入口（未配置模型等错误在 flush 前以 JSON 返回）

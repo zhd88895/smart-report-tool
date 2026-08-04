@@ -12,6 +12,7 @@ import { Readable } from 'stream';
 import * as tar from 'tar';
 import AdmZip from 'adm-zip';
 import { getLogger } from '../utils/logger';
+import { settingsService } from './settingsService';
 
 const log = getLogger('ArchiveAnalysisService', 'core');
 
@@ -49,10 +50,42 @@ const TEXT_EXTS = ['.txt', '.log', '.csv', '.json', '.xml', '.ini', '.cfg', '.co
 const P0_RE = /(event|alarm|sel|diagnos|fault|fdm_log)/i;
 const P1_RE = /(kernel|raid|storage|sensor|bmc|system|power|fan|temp|osdump|linux)/i;
 
+// ── 默认扩展名（设置未配置时的兜底） ────────────
+const DEFAULT_ARCHIVE_EXTS = ['.zip', '.tar', '.gz', '.tgz', '.tar.gz', '.tar.bz2', '.tar.xz'];
+
+/**
+ * 从系统设置读取逗号分隔的扩展名列表，未配置时返回兜底值。
+ * 统一规范为小写、以 . 开头。
+ */
+function getExtensionList(settingKey: string, fallback: string[]): string[] {
+  const raw = settingsService.get(settingKey);
+  if (!raw || !raw.trim()) return fallback;
+  const list = raw.split(',')
+    .map((s) => s.trim().toLowerCase())
+    .filter((s) => s.length > 0)
+    .map((s) => (s.startsWith('.') ? s : `.${s}`));
+  return list.length > 0 ? list : fallback;
+}
+
+/** 当前允许的压缩包扩展名列表 */
+export function getArchiveExtensions(): string[] {
+  return getExtensionList('storage.archiveExtensions', DEFAULT_ARCHIVE_EXTS);
+}
+
+/** 当前允许的文本文件扩展名列表 */
+export function getTextExtensions(): string[] {
+  return getExtensionList('storage.textExtensions', TEXT_EXTS);
+}
+
+/** 文件名是否匹配扩展名列表（复合扩展名如 .tar.gz 用 endsWith 覆盖） */
+function matchesExtension(fileName: string, exts: string[]): boolean {
+  const lower = fileName.toLowerCase();
+  return exts.some((ext) => lower.endsWith(ext));
+}
+
 /** 是否压缩包（扩展名 + 可选 magic bytes 双重判定） */
 export function isArchiveFile(fileName: string, buffer?: Buffer): boolean {
-  const lower = fileName.toLowerCase();
-  const byName = /\.(zip|tar|gz|tgz)$/.test(lower);
+  const byName = matchesExtension(fileName, getArchiveExtensions());
   if (!buffer || buffer.length < 4) return byName;
   const isGzip = buffer[0] === 0x1f && buffer[1] === 0x8b;
   const isZip = buffer[0] === 0x50 && buffer[1] === 0x4b;
@@ -73,7 +106,7 @@ function detectText(name: string, data: Buffer): boolean {
   const lower = name.toLowerCase();
   const dot = lower.lastIndexOf('.');
   const ext = dot >= 0 ? lower.slice(dot) : '';
-  if (TEXT_EXTS.includes(ext)) return true;
+  if (getTextExtensions().includes(ext)) return true;
   const sample = data.subarray(0, Math.min(data.length, 8192));
   if (sample.includes(0)) return false;
   let ctrl = 0;

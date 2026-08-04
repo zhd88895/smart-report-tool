@@ -391,6 +391,9 @@ async function createSchema(): Promise<void> {
   // （数据保留，后续正式实现对应功能后取消隐藏即可）
   await migrateSettingsHiddenFlag();
 
+  // 迁移：为已存在的库补充上传扩展名配置（seed 只在空库时执行）
+  await migrateUploadExtensionSettings();
+
   // 迁移：上传文件 hash 去重索引表（内容寻址存储 data/uploads/dedup/）
   await runAsync(`CREATE TABLE IF NOT EXISTS file_hashes (
     hash TEXT PRIMARY KEY,
@@ -663,6 +666,8 @@ async function seedDefaultSettings(): Promise<void> {
       { key: 'system.logLevel', value: 'info', category: 'system', label: '日志级别', value_type: 'select', options: JSON.stringify(['debug','info','warn','error']), sort_order: 3 },
       { key: 'storage.uploadLimit', value: '50', category: 'storage', label: '上传文件大小限制（MB）', description: '脚本/模板/报告等上传单文件上限，调整后即时生效', value_type: 'number', sort_order: 1 },
       { key: 'storage.retentionDays', value: '90', category: 'storage', label: '文件保留天数', description: '临时上传文件超过 N 天未使用自动删除，调整后于下次清理周期生效', value_type: 'number', sort_order: 2 },
+      { key: 'storage.archiveExtensions', value: '.zip,.tar,.gz,.tgz,.tar.gz,.tar.bz2,.tar.xz', category: 'storage', label: '压缩包扩展名', description: '支持包/压缩包允许上传的扩展名，逗号分隔（如 .sds），调整后即时生效；解压按文件实际格式自动识别', value_type: 'string', sort_order: 3 },
+      { key: 'storage.textExtensions', value: '.txt,.log,.conf,.csv,.xml,.json,.yml,.yaml,.out,.err,.md,.xlsx,.xls', category: 'storage', label: '文本文件扩展名', description: '单文件模式允许上传的扩展名，逗号分隔，调整后即时生效', value_type: 'string', sort_order: 4 },
       { key: 'security.adminPassword', value: 'SmartReport@2026', category: 'security', label: '管理员初始密码', value_type: 'string', is_secret: 1, sort_order: 1 },
       { key: 'security.rateLimit', value: '100', category: 'security', label: '速率限制（次/分钟）', description: '通用 API 每 IP 每分钟请求上限，调整后即时生效', value_type: 'number', sort_order: 2 },
       { key: 'security.corsOrigin', value: '', category: 'security', label: 'CORS 额外允许源', description: '在环境变量基础上追加允许的跨域来源，多个用逗号分隔，支持 *.example.com 通配', value_type: 'string', sort_order: 3 },
@@ -758,6 +763,29 @@ async function migrateSettingsHiddenFlag(): Promise<void> {
     }
   } catch (e: any) {
     logger.warn(`settings 占位配置隐藏跳过: ${e.message}`);
+  }
+}
+
+/**
+ * 迁移：为已存在的库补充上传扩展名配置
+ * （seedDefaultSettings 仅在空库执行，老库需要在这里补插，INSERT OR IGNORE 幂等）
+ */
+async function migrateUploadExtensionSettings(): Promise<void> {
+  const now = new Date().toISOString();
+  const items = [
+    { key: 'storage.archiveExtensions', value: '.zip,.tar,.gz,.tgz,.tar.gz,.tar.bz2,.tar.xz', label: '压缩包扩展名', description: '支持包/压缩包允许上传的扩展名，逗号分隔（如 .sds），调整后即时生效；解压按文件实际格式自动识别', sort_order: 3 },
+    { key: 'storage.textExtensions', value: '.txt,.log,.conf,.csv,.xml,.json,.yml,.yaml,.out,.err,.md,.xlsx,.xls', label: '文本文件扩展名', description: '单文件模式允许上传的扩展名，逗号分隔，调整后即时生效', sort_order: 4 },
+  ];
+  try {
+    for (const s of items) {
+      await runAsync(
+        `INSERT OR IGNORE INTO settings (key, value, category, label, description, value_type, options, editable_by, is_secret, sort_order, updated_at)
+         VALUES (?, ?, 'storage', ?, ?, 'string', NULL, 'admin', 0, ?, ?)`,
+        [s.key, s.value, s.label, s.description, s.sort_order, now]
+      );
+    }
+  } catch (e: any) {
+    logger.warn(`上传扩展名配置补插跳过: ${e.message}`);
   }
 }
 export function runAsync(sql: string, params: any[] = []): Promise<sqlite3.RunResult> {

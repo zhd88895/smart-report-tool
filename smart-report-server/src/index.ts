@@ -223,13 +223,24 @@ app.get('/api/health', (_req: Request, res: Response): void => {
  * 当前仅包含会话空闲超时（前端空闲登出倒计时略早于此值）。
  */
 app.get('/api/public-config', (_req: Request, res: Response): void => {
-  const response: ApiResponse<{ sessionTimeoutMinutes: number }> = {
+  // 从设置读取扩展名列表，逗号分隔 → 数组
+  const extList = (key: string, fallback: string): string[] => {
+    const raw = settingsService.get(key) || fallback;
+    return raw.split(',').map((s) => s.trim()).filter(Boolean);
+  };
+  const response: ApiResponse<{
+    sessionTimeoutMinutes: number;
+    archiveExtensions: string[];
+    textExtensions: string[];
+  }> = {
     code: 200,
     data: {
       sessionTimeoutMinutes: settingsService.getNumber(
         'system.sessionTimeout',
         getConfig().SESSION_EXPIRY_MINUTES
       ),
+      archiveExtensions: extList('storage.archiveExtensions', '.zip,.tar,.gz,.tgz,.tar.gz,.tar.bz2,.tar.xz'),
+      textExtensions: extList('storage.textExtensions', '.txt,.log,.conf,.csv,.xml,.json,.yml,.yaml,.out,.err,.md,.xlsx,.xls'),
     },
     message: 'success',
   };
