@@ -128,24 +128,24 @@ export default function DashboardPage() {
 
   const quickActions = [
     {
-      title: 'AI 智能分析',
-      description: '上传日志或支持包，AI 自动分析并生成报告',
-      icon: Sparkles,
-      path: `${ROUTES.REPORT_CREATE}?mode=ai`,
+      title: 'AI 助手',
+      description: '可分析日志、读写脚本、解答运维问题',
+      icon: Bot,
+      path: ROUTES.ASSISTANT,
       highlight: true,
-    },
-    {
-      title: '脚本生成报告',
-      description: '选择巡检脚本，生成标准报告',
-      icon: FilePlus2,
-      path: `${ROUTES.REPORT_CREATE}?mode=script`,
-      highlight: false,
     },
     {
       title: '知识库',
       description: '管理手册资料，供 AI 分析时引用',
       icon: Database,
       path: ROUTES.KNOWLEDGE_BASE,
+      highlight: false,
+    },
+    {
+      title: '脚本生成报告',
+      description: '选择巡检脚本，生成标准报告',
+      icon: FilePlus2,
+      path: `${ROUTES.REPORT_CREATE}?mode=script`,
       highlight: false,
     },
     {
@@ -191,19 +191,19 @@ export default function DashboardPage() {
         )}
       </div>
 
-      {/* AI 助手大入口卡 */}
+      {/* AI 智能分析大入口卡（主功能） */}
       <Card
         className="cursor-pointer border-primary/30 bg-primary/5 transition-colors hover:bg-primary/10"
-        onClick={() => navigate(ROUTES.ASSISTANT)}
+        onClick={() => navigate(`${ROUTES.REPORT_CREATE}?mode=ai`)}
       >
         <CardContent className="flex items-center gap-4 p-6">
           <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground">
-            <Bot className="h-7 w-7" />
+            <Sparkles className="h-7 w-7" />
           </div>
           <div className="flex-1">
-            <h3 className="text-lg font-semibold text-foreground">AI 助手</h3>
+            <h3 className="text-lg font-semibold text-foreground">AI 智能分析</h3>
             <p className="text-sm text-muted-foreground">
-              可分析日志、读写脚本、解答运维问题，点击开始对话
+              上传日志或整机支持包，AI 自动拆包分析并生成巡检报告，点击开始
             </p>
           </div>
           <ChevronRight className="h-5 w-5 shrink-0 text-primary" />
