@@ -1,6 +1,6 @@
 {
   "name": "smart-report-system",
-  "version": "1.0.0",
+  "version": "0.4.0",
   "description": "智能报告生成工具 - 前后端完整系统",
   "scripts": {
     "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",

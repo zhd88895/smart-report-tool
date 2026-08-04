@@ -1,29 +1,41 @@
 # 智能报告生成工具 - 本地部署版
 
+> **当前版本**：v0.4.0（2026-08-04）
+>
+> v0.4.0 亮点：AI 服务多厂商化（服务端集中管理 + 用户级配置隔离）、支持包整包智能分析、文件秒传去重、全站 UI 统一与 AI 主功能化。
+
 ## 系统架构
 
 <p align="center">
   <img src="docs/architecture.png" alt="系统架构图" width="720">
 </p>
 
-## 本地启动步骤
+## 一键启动（推荐）
+
+项目根目录提供一键启动/停止脚本，自动完成依赖检查、端口冲突检测、健康等待与浏览器打开：
+
+| 平台 | 启动 | 停止 |
+|------|------|------|
+| Windows (CMD) | `start.bat` | `stop.bat` |
+| Windows (PowerShell) | `start.ps1` | `stop.ps1` |
+| Linux / macOS | `./start.sh` | Ctrl+C 自动清理 |
+
+首次运行会自动安装前后端依赖，并从 `.env.example` 生成后端配置文件（请按需修改 `smart-report-server/.env`）。
+
+- 前端：`http://localhost:5173`
+- 后端：`http://localhost:3001`（健康检查 `/api/health`）
+
+## 手动启动步骤
 
 ### 1. 安装依赖
 
 ```bash
-# 进入项目根目录
-cd 智能报告生成工具
-
-# 安装前端依赖
-cd smart-report-tool
+# 安装后端依赖
+cd smart-report-server
 npm install
 
-# 安装后端依赖（不需要安装，直接用 npx tsx 运行）
-cd ../smart-report-server
-# 后端零依赖，无需安装
-
-# 安装同时启动工具（可选）
-cd ..
+# 安装前端依赖
+cd ../smart-report-tool
 npm install
 ```
 
@@ -36,7 +48,7 @@ npx tsx watch src/index.ts
 
 后端服务将启动在 `http://localhost:3001`
 
-数据存储目录：`C:\Users\{用户名}\智能报告生成工具\`
+数据存储目录：`smart-report-server/data/`（数据库、脚本、模板、上传文件、生成的报告均在项目内）
 
 ### 3. 启动前端（新终端）
 
@@ -49,45 +61,36 @@ npx vite --port 5173
 
 ### 4. 使用系统
 
-打开浏览器访问 `http://localhost:5173`
+打开浏览器访问 `http://localhost:5173`，默认账号见 `docs/用户使用说明文档.md`。
 
 ## 功能说明
+
+### AI 能力（v0.4.0 主功能）
+- **AI 智能分析**：上传巡检日志（txt/log/csv/json/xlsx）流式生成分析报告；支持包模式可整包拆析 zip/tar.gz 支持包，支持用户补充提示词
+- **多厂商 AI 服务**：服务端集中管理模型配置，按用户隔离（各自配置各自使用），支持设置默认模型与用量统计
+- **AI 助手**：对话式助手，可读写脚本、分析脚本、自动执行脚本（工具调用）
+- **知识库**：分类管理参考文件，AI 分析时可关联参考
 
 ### 后端能力
 - **脚本管理**：接收上传的 Python/BAT/PowerShell/Shell 脚本，存储在本地文件系统
 - **模板管理**：接收 docx/xlsx/md/pdf 模板上传
-- **文件上传**：接收巡检数据文件（支持批量上传和压缩包）
+- **文件上传**：接收巡检数据文件（支持批量上传和压缩包），SHA-256 秒传去重
+- **文件清理**：按保留天数自动清理临时文件
 - **脚本执行**：真实执行用户上传的脚本，使用 `child_process.spawn`
 - **实时日志**：通过 SSE 流式返回脚本执行日志到前端
 - **报告生成**：脚本输出 + 模板套用 → 生成最终报告文件
 - **报告下载**：按格式下载生成的报告
 
-### 数据存储
-- 所有元数据存储在 `~/智能报告生成工具/db.json`
-- 脚本文件：`~/智能报告生成工具/scripts/{scriptId}/`
-- 模板文件：`~/智能报告生成工具/templates/{templateId}/`
-- 巡检文件：`~/智能报告生成工具/uploads/`
-- 生成报告：`~/智能报告生成工具/reports/{reportId}/`
-
-### API 列表
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | /api/health | 健康检查 |
-| GET | /api/scripts | 获取脚本列表 |
-| POST | /api/scripts | 上传脚本（multipart） |
-| DELETE | /api/scripts/:id | 删除脚本 |
-| GET | /api/templates | 获取模板列表 |
-| POST | /api/templates | 上传模板（multipart） |
-| GET | /api/reports | 获取报告列表 |
-| POST | /api/reports | 创建报告记录 |
-| DELETE | /api/reports/:id | 删除报告 |
-| POST | /api/reports/generate | 生成报告（SSE 流） |
-| GET | /api/reports/:id/download | 下载报告 |
+### 数据存储（均在 `smart-report-server/data/` 下）
+- SQLite 数据库：`data/smart-report.db`
+- 脚本文件：`data/scripts/{scriptId}/`
+- 模板文件：`data/templates/{templateId}/`
+- 上传文件：`data/uploads/`（去重存储 `data/uploads/dedup/`）
+- 生成报告：`data/reports/{reportId}/`
 
 ## 脚本执行流程
 
-1. 前端上传巡检文件 → 后端存储到 `uploads/`
+1. 前端上传巡检文件 → 后端存储（命中去重则秒传引用）
 2. 前端选择脚本和模板 → 发送生成请求到后端
 3. 后端创建临时工作目录 `reports/{reportId}/`
 4. 后端将脚本、辅助文件、模板复制到工作目录
@@ -100,6 +103,13 @@ npx vite --port 5173
 ## 环境要求
 
 - Node.js 18+
-- Python 3.x（如果要执行 Python 脚本）
+- Python 3.x（如果要执行 Python 脚本；项目内嵌 Python 环境自动管理）
 - PowerShell（如果要执行 .ps1 脚本）
 - Bash（如果在 Linux/Mac 上执行 .sh 脚本）
+
+## 更多文档
+
+- 用户使用说明：`docs/用户使用说明文档.md`
+- 系统设计：`docs/system_design.md`
+- 启动指南：`STARTUP_GUIDE.md`
+- 功能更新记录：`功能更新说明-2026-08-04.md`

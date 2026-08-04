@@ -1,6 +1,6 @@
 {
   "name": "smart-report-server",
-  "version": "0.3.2",
+  "version": "0.4.0",
   "description": "智能报告生成工具后端服务",
   "main": "dist/index.js",
   "scripts": {

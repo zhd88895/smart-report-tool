@@ -134,6 +134,34 @@ Write-Host ""
 Write-Host "[DONE] Services are starting, please wait..." -ForegroundColor Green
 Write-Host ""
 
+# ---- Wait for services to be healthy, then open browser ----
+function Wait-ServiceReady([string]$url, [string]$name, [int]$maxSeconds = 30) {
+    $elapsed = 0
+    while ($elapsed -lt $maxSeconds) {
+        try {
+            $resp = Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 2
+            if ($resp.StatusCode -eq 200) {
+                Write-Host "  OK $name is ready" -ForegroundColor Green
+                return $true
+            }
+        } catch { }
+        Start-Sleep -Seconds 1
+        $elapsed++
+    }
+    Write-Host "  WARN $name health check timed out" -ForegroundColor Yellow
+    return $false
+}
+
+$backendReady  = Wait-ServiceReady "http://localhost:3001/api/health" "Backend"
+$frontendReady = Wait-ServiceReady "http://localhost:5173" "Frontend"
+
+if ($frontendReady) {
+    Write-Host ""
+    Write-Host "[OPEN] Opening browser at http://localhost:5173 ..." -ForegroundColor Green
+    Start-Process "http://localhost:5173"
+}
+Write-Host ""
+
 try {
     while ($true) {
         # Backend output
