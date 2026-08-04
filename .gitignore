@@ -27,3 +27,4 @@ smart-report-tool.7z
 %DEST%/
 repo.bundle
 repo-temp/
+run-out.txt
