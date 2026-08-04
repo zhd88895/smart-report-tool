@@ -11,7 +11,6 @@ import ReportCreatePage from '@/pages/ReportCreatePage';
 import ReportsPage from '@/pages/ReportsPage';
 import AssistantPage from '@/pages/AssistantPage';
 import UsersPage from '@/pages/UsersPage';
-import ConversationsPage from '@/pages/ConversationsPage';
 import SettingsPage from '@/pages/SettingsPage';
 import SystemSettingsPage from '@/pages/SystemSettingsPage';
 import AISettingsPage from '@/pages/AISettingsPage';
@@ -29,7 +28,8 @@ export function AppRouter() {
         <Route path={ROUTES.REPORTS} element={<RouteGuard requiredFeature="reports"><ReportsPage /></RouteGuard>} />
         <Route path={ROUTES.ASSISTANT} element={<RouteGuard requiredFeature="assistant"><AssistantPage /></RouteGuard>} />
         <Route path={ROUTES.USERS} element={<RouteGuard requiredFeature="users"><UsersPage /></RouteGuard>} />
-        <Route path={ROUTES.CONVERSATIONS} element={<RouteGuard requiredFeature="conversations"><ConversationsPage /></RouteGuard>} />
+        {/* 对话记录已迁入个人设置（?tab=conversations），旧链接重定向兼容 */}
+        <Route path={ROUTES.CONVERSATIONS} element={<Navigate to={`${ROUTES.SETTINGS}?tab=conversations`} replace />} />
         <Route path={ROUTES.SETTINGS} element={<RouteGuard requiredFeature="settings"><SettingsPage /></RouteGuard>} />
         <Route path={ROUTES.SYSTEM_SETTINGS} element={<RouteGuard requiredFeature="systemSettings"><SystemSettingsPage /></RouteGuard>} />
         <Route path={ROUTES.AI_SETTINGS} element={<RouteGuard requiredFeature="ai-settings"><AISettingsPage /></RouteGuard>} />

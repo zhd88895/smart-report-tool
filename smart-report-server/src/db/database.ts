@@ -303,6 +303,7 @@ async function createSchema(): Promise<void> {
       feature TEXT NOT NULL,
       prompt_tokens INTEGER DEFAULT 0,
       completion_tokens INTEGER DEFAULT 0,
+      conversation_id TEXT,
       created_at TEXT NOT NULL
     );
 
@@ -358,6 +359,15 @@ async function createSchema(): Promise<void> {
   try {
     await runAsync('ALTER TABLE scripts ADD COLUMN is_multi_file INTEGER DEFAULT 0');
     logger.info('数据库迁移: 已添加 scripts.is_multi_file 列');
+  } catch (error: any) {
+    if (!error.message?.includes('duplicate column name')) {
+    }
+  }
+
+  // 迁移：为 user_ai_usage_logs 表添加 conversation_id 列（对话级 token 统计）
+  try {
+    await runAsync('ALTER TABLE user_ai_usage_logs ADD COLUMN conversation_id TEXT');
+    logger.info('数据库迁移: 已添加 user_ai_usage_logs.conversation_id 列');
   } catch (error: any) {
     if (!error.message?.includes('duplicate column name')) {
     }

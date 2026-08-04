@@ -88,6 +88,8 @@ export interface UserAIRequest {
   tools?: AIToolDefinition[];
   temperature?: number;
   maxOutputTokens?: number;
+  /** 所属对话 ID（仅 AI 助手对话场景），写入用量日志用于对话级 token 统计 */
+  conversationId?: string;
 }
 
 /** 统一 AI 调用响应（非流式） */
@@ -267,6 +269,7 @@ export async function callUserAI(userId: string, req: UserAIRequest): Promise<Us
         feature: req.feature,
         prompt_tokens: usage.promptTokens,
         completion_tokens: usage.completionTokens,
+        conversation_id: req.conversationId,
       });
     } catch (e) {
       log.warn(`写用量日志失败: ${(e as Error).message}`);
@@ -370,7 +373,8 @@ async function logStreamUsage(
   feature: UserAIRequest['feature'],
   usage: { promptTokens: number; completionTokens: number } | null,
   promptChars: number,
-  completionChars: number
+  completionChars: number,
+  conversationId?: string
 ): Promise<void> {
   // .env 兜底无数据库模型记录，与非流式 callUserAI 一致不写用量日志
   if (!cfg.modelDbId) return;
@@ -381,6 +385,7 @@ async function logStreamUsage(
       feature,
       prompt_tokens: usage?.promptTokens ?? Math.ceil(promptChars / 2),
       completion_tokens: usage?.completionTokens ?? Math.ceil(completionChars / 2),
+      conversation_id: conversationId,
     });
   } catch (e) {
     log.warn(`写流式用量日志失败: ${(e as Error).message}`);
@@ -422,24 +427,24 @@ export async function callUserAIStream(
     });
   } catch (e) {
     // 请求未发出即失败：记一条 0-token 用量日志后原样抛出
-    await logStreamUsage(userId, cfg, req.feature, { promptTokens: 0, completionTokens: 0 }, 0, 0);
+    await logStreamUsage(userId, cfg, req.feature, { promptTokens: 0, completionTokens: 0 }, 0, 0, req.conversationId);
     throw e;
   }
 
   if (!response.ok) {
     // 上游返回错误：记一条 0-token 用量日志后按统一错误处理抛出
-    await logStreamUsage(userId, cfg, req.feature, { promptTokens: 0, completionTokens: 0 }, 0, 0);
+    await logStreamUsage(userId, cfg, req.feature, { promptTokens: 0, completionTokens: 0 }, 0, 0, req.conversationId);
     await throwForErrorResponse(response, 'callUserAIStream');
   }
   if (!response.body) {
-    await logStreamUsage(userId, cfg, req.feature, { promptTokens: 0, completionTokens: 0 }, 0, 0);
+    await logStreamUsage(userId, cfg, req.feature, { promptTokens: 0, completionTokens: 0 }, 0, 0, req.conversationId);
     throw new Error('API 未返回流式响应');
   }
 
   const wrappedStream = wrapStreamForUsageLogging(
     response.body as unknown as ReadableStream<Uint8Array>,
     (usage, completionChars) => {
-      logStreamUsage(userId, cfg, req.feature, usage, promptChars, completionChars).catch(() => {});
+      logStreamUsage(userId, cfg, req.feature, usage, promptChars, completionChars, req.conversationId).catch(() => {});
     }
   );
 

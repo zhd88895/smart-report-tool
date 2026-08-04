@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Save, Shield, Lock, Trash2, AlertTriangle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -6,6 +7,8 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { ConversationRecordsPanel } from '@/components/settings/ConversationRecordsPanel';
 import { useAuthStore } from '@/stores/authStore';
 import { LoadingSpinner } from '@/components/common/LoadingSpinner';
 import { useUserStore } from '@/stores/userStore';
@@ -100,80 +103,105 @@ export default function SettingsPage() {
 
   const canDeleteSelf = !(user?.role === 'admin' && adminCount <= 1);
 
+  // 页内 Tab：基本设置 / 对话记录（URL ?tab= 驱动，支持从旧 /conversations 入口重定向过来）
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeTab = searchParams.get('tab') === 'conversations' ? 'conversations' : 'general';
+  const setActiveTab = (v: string) => {
+    setSearchParams(v === 'conversations' ? { tab: 'conversations' } : {}, { replace: true });
+  };
+
   return (
     <div className="space-y-6">
       <h2 className="text-2xl font-bold tracking-tight">个人设置</h2>
 
-      <Card className="max-w-lg">
-        <CardHeader>
-          <CardTitle>基本信息</CardTitle>
-          <CardDescription>查看和修改您的个人资料</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="space-y-2"><Label>用户名</Label><Input value={user?.username || ''} disabled /></div>
-          <div className="space-y-2"><Label>显示名称</Label><Input value={displayName} onChange={(e) => setDisplayName(e.target.value)} /></div>
-          <div className="space-y-2">
-            <Label>角色</Label>
-            <div className="flex items-center gap-2 px-3 py-2 rounded-md bg-muted text-sm">
-              <Shield className="h-4 w-4 text-primary" />{user?.role ? ROLE_LABELS[user.role] : '-'}
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
+        <TabsList>
+          <TabsTrigger value="general">基本设置</TabsTrigger>
+          <TabsTrigger value="conversations">对话记录</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="general" className="mt-4">
+          {/* 双列布局：左列基本信息，右列修改密码 + 危险操作，避免右侧大片留白 */}
+          <div className="grid gap-6 lg:grid-cols-2 items-start">
+            <Card>
+              <CardHeader>
+                <CardTitle>基本信息</CardTitle>
+                <CardDescription>查看和修改您的个人资料</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="space-y-2"><Label>用户名</Label><Input value={user?.username || ''} disabled /></div>
+                <div className="space-y-2"><Label>显示名称</Label><Input value={displayName} onChange={(e) => setDisplayName(e.target.value)} /></div>
+                <div className="space-y-2">
+                  <Label>角色</Label>
+                  <div className="flex items-center gap-2 px-3 py-2 rounded-md bg-muted text-sm">
+                    <Shield className="h-4 w-4 text-primary" />{user?.role ? ROLE_LABELS[user.role] : '-'}
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label>账户状态</Label>
+                  <div className="flex items-center gap-2">
+                    <span className={`px-2 py-1 rounded text-xs ${user?.status ? STATUS_COLORS[user.status] : ''}`}>{user?.status ? STATUS_LABELS[user.status] : '-'}</span>
+                  </div>
+                </div>
+                {user?.role === 'admin' && (
+                  <div className="space-y-2">
+                    <Label>所属区域</Label>
+                    <Select value={region} onValueChange={(v) => setRegion(v as ScriptRegion)}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {REGION_LIST.map((r) => (<SelectItem key={r} value={r}>{r}</SelectItem>))}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground">设置你的管辖区域，报告中同区域数据将优先展示</p>
+                  </div>
+                )}
+                <Button onClick={handleSave} disabled={saving}>
+                  {saving ? <LoadingSpinner className="inline-flex py-0 mr-2" /> : <Save className="mr-2 h-4 w-4" />}
+                  {saving ? '保存中...' : '保存设置'}
+                </Button>
+              </CardContent>
+            </Card>
+
+            <div className="space-y-6">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2"><Lock className="h-4 w-4" />修改密码</CardTitle>
+                  <CardDescription>输入当前密码并设置新密码</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="space-y-2"><Label>当前密码</Label><Input type="password" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} /></div>
+                  <div className="space-y-2"><Label>新密码</Label><Input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder="至少6位" /></div>
+                  <div className="space-y-2"><Label>确认新密码</Label><Input type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} /></div>
+                  <Button onClick={handleChangePassword} disabled={changingPwd}>
+                    {changingPwd ? <LoadingSpinner className="inline-flex py-0 mr-2" /> : <Lock className="mr-2 h-4 w-4" />}
+                    {changingPwd ? '修改中...' : '修改密码'}
+                  </Button>
+                </CardContent>
+              </Card>
+
+              <Card className="border-destructive/30">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-destructive"><AlertTriangle className="h-4 w-4" />删除账户</CardTitle>
+                  <CardDescription>
+                    {canDeleteSelf
+                      ? '删除后将立即退出登录，此操作不可撤销'
+                      : '系统中至少需要保留一个管理员，无法删除自己'}
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <Button variant="destructive" onClick={() => { setDeletePassword(''); setShowDeleteDialog(true); }} disabled={!canDeleteSelf}>
+                    <Trash2 className="mr-2 h-4 w-4" />删除我的账户
+                  </Button>
+                </CardContent>
+              </Card>
             </div>
           </div>
-          <div className="space-y-2">
-            <Label>账户状态</Label>
-            <div className="flex items-center gap-2">
-              <span className={`px-2 py-1 rounded text-xs ${user?.status ? STATUS_COLORS[user.status] : ''}`}>{user?.status ? STATUS_LABELS[user.status] : '-'}</span>
-            </div>
-          </div>
-          {user?.role === 'admin' && (
-            <div className="space-y-2">
-              <Label>所属区域</Label>
-              <Select value={region} onValueChange={(v) => setRegion(v as ScriptRegion)}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {REGION_LIST.map((r) => (<SelectItem key={r} value={r}>{r}</SelectItem>))}
-                </SelectContent>
-              </Select>
-              <p className="text-xs text-muted-foreground">设置你的管辖区域，报告中同区域数据将优先展示</p>
-            </div>
-          )}
-          <Button onClick={handleSave} disabled={saving}>
-            {saving ? <LoadingSpinner className="inline-flex py-0 mr-2" /> : <Save className="mr-2 h-4 w-4" />}
-            {saving ? '保存中...' : '保存设置'}
-          </Button>
-        </CardContent>
-      </Card>
+        </TabsContent>
 
-      <Card className="max-w-lg">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2"><Lock className="h-4 w-4" />修改密码</CardTitle>
-          <CardDescription>输入当前密码并设置新密码</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="space-y-2"><Label>当前密码</Label><Input type="password" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} /></div>
-          <div className="space-y-2"><Label>新密码</Label><Input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder="至少6位" /></div>
-          <div className="space-y-2"><Label>确认新密码</Label><Input type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} /></div>
-          <Button onClick={handleChangePassword} disabled={changingPwd}>
-            {changingPwd ? <LoadingSpinner className="inline-flex py-0 mr-2" /> : <Lock className="mr-2 h-4 w-4" />}
-            {changingPwd ? '修改中...' : '修改密码'}
-          </Button>
-        </CardContent>
-      </Card>
-
-      <Card className="max-w-lg border-destructive/30">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-destructive"><AlertTriangle className="h-4 w-4" />删除账户</CardTitle>
-          <CardDescription>
-            {canDeleteSelf
-              ? '删除后将立即退出登录，此操作不可撤销'
-              : '系统中至少需要保留一个管理员，无法删除自己'}
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Button variant="destructive" onClick={() => { setDeletePassword(''); setShowDeleteDialog(true); }} disabled={!canDeleteSelf}>
-            <Trash2 className="mr-2 h-4 w-4" />删除我的账户
-          </Button>
-        </CardContent>
-      </Card>
+        <TabsContent value="conversations" className="mt-4">
+          <ConversationRecordsPanel />
+        </TabsContent>
+      </Tabs>
 
       <Dialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
         <DialogContent>

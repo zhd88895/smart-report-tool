@@ -172,6 +172,8 @@ export interface Conversation {
   messages: ConversationMessage[];
   createdAt: string;
   updatedAt: string;
+  /** 对话级 token 用量（后端按 conversation_id 聚合；无记录时为 null） */
+  tokenUsage?: { promptTokens: number; completionTokens: number; totalTokens: number; calls: number } | null;
 }
 
 export interface ReportTemplate {

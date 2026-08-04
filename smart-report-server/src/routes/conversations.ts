@@ -9,12 +9,13 @@
 
 import { Router, Request, Response } from 'express';
 import { conversationRepository } from '../db/repositories';
+import { userAIConfigRepository } from '../db/repositories/userAIConfigRepository';
 import { authenticate } from '../middleware/auth';
 import { ApiResponse, safeErrorMessage } from '../types';
 
 const router = Router();
 
-/** 获取对话列表（严格按当前登录用户过滤） */
+/** 获取对话列表（严格按当前登录用户过滤），并合并每个对话的 token 用量统计 */
 router.get('/', authenticate, async (req: Request, res: Response): Promise<void> => {
   try {
     const currentUserId = req.user?.userId;
@@ -25,9 +26,21 @@ router.get('/', authenticate, async (req: Request, res: Response): Promise<void>
       return;
     }
     const conversations = await conversationRepository.findAll({ userId: currentUserId });
+    // 对话级 token 统计：usage 日志按 conversation_id 聚合后并入对话对象
+    const usageRows = await userAIConfigRepository.getConversationUsage(currentUserId);
+    const usageMap = new Map(usageRows.map((r) => [r.conversation_id, r]));
+    const withUsage = conversations.map((c: any) => {
+      const u = usageMap.get(c.id);
+      return {
+        ...c,
+        tokenUsage: u
+          ? { promptTokens: u.prompt_total, completionTokens: u.completion_total, totalTokens: u.prompt_total + u.completion_total, calls: u.calls }
+          : null,
+      };
+    });
     res.status(200).json({
-      code: 200, data: { conversations }, message: '获取对话列表成功',
-    } as ApiResponse<{ conversations: typeof conversations }>);
+      code: 200, data: { conversations: withUsage }, message: '获取对话列表成功',
+    } as ApiResponse<{ conversations: typeof withUsage }>);
   } catch (error: any) {
     res.status(500).json({
       code: 500, data: null, message: '获取对话列表失败', error: safeErrorMessage(error),

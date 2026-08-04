@@ -170,7 +170,7 @@ export class AIRoutes {
   /** 非流式聊天：按当前登录用户的数据库配置统一调用；enableTools 时走工具循环 */
   private async chat(req: Request, res: Response): Promise<void> {
     try {
-      const { messages = [], modelId, enableTools } = req.body as { messages: AIMessage[]; modelId?: string; enableTools?: boolean };
+      const { messages = [], modelId, enableTools, conversationId } = req.body as { messages: AIMessage[]; modelId?: string; enableTools?: boolean; conversationId?: string };
       if (!messages.length) {
         res.status(400).json({ code: 400, data: null, message: '消息不能为空' } satisfies ApiResponse<null>);
         return;
@@ -178,7 +178,7 @@ export class AIRoutes {
       if (enableTools) {
         const result = await runToolLoop(req.user!.userId, {
           messages: [{ role: 'system', content: buildToolSystemPrompt() }, ...messages],
-          modelId, feature: 'chat',
+          modelId, feature: 'chat', conversationId,
         });
         if (result.fallback) res.setHeader('X-AI-Fallback', 'true');
         res.status(200).json({ code: 200, data: result, message: 'success' } satisfies ApiResponse<any>);
@@ -186,7 +186,7 @@ export class AIRoutes {
       }
       const result = await callUserAI(req.user!.userId, {
         messages: [{ role: 'system', content: buildSystemPrompt() }, ...messages],
-        modelId, feature: 'chat',
+        modelId, feature: 'chat', conversationId,
       });
       // 走了 .env 兜底时给响应头打标记，便于前端提示用户
       if (result.fallback) res.setHeader('X-AI-Fallback', 'true');
@@ -204,7 +204,7 @@ export class AIRoutes {
    *  message/usage/toolsUsed/pendingConfirm 等完整结果 */
   private async chatStream(req: Request, res: Response): Promise<void> {
     try {
-      const { messages = [], modelId, enableTools } = req.body as { messages: AIMessage[]; modelId?: string; enableTools?: boolean };
+      const { messages = [], modelId, enableTools, conversationId } = req.body as { messages: AIMessage[]; modelId?: string; enableTools?: boolean; conversationId?: string };
       if (!messages.length) {
         res.status(400).json({ code: 400, data: null, message: '消息不能为空' } satisfies ApiResponse<null>);
         return;
@@ -231,7 +231,7 @@ export class AIRoutes {
             req.user!.userId,
             {
               messages: [{ role: 'system', content: buildToolSystemPrompt() }, ...messages],
-              modelId, feature: 'chat',
+              modelId, feature: 'chat', conversationId,
             },
             {
               onReady: ({ fallback }) => startSse(fallback),
@@ -269,7 +269,7 @@ export class AIRoutes {
       // 先调用统一入口（未配置模型等错误在 flush 前以 JSON 返回）
       const { stream, fallback } = await callUserAIStream(req.user!.userId, {
         messages: [{ role: 'system', content: buildSystemPrompt() }, ...messages],
-        modelId, feature: 'chat',
+        modelId, feature: 'chat', conversationId,
       });
 
       res.setHeader('Content-Type', 'text/event-stream');

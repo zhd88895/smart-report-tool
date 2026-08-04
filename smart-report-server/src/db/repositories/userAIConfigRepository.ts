@@ -291,13 +291,32 @@ export const userAIConfigRepository = {
     feature: string;
     prompt_tokens: number;
     completion_tokens: number;
+    /** 所属对话 ID（仅 AI 助手对话场景有值，用于对话级 token 统计） */
+    conversation_id?: string;
   }): Promise<void> {
     const id = genId('uail');
     await runAsync(
-      `INSERT INTO user_ai_usage_logs (id, user_id, model_id, feature, prompt_tokens, completion_tokens, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [id, entry.user_id, entry.model_id, entry.feature, entry.prompt_tokens || 0, entry.completion_tokens || 0, new Date().toISOString()]
+      `INSERT INTO user_ai_usage_logs (id, user_id, model_id, feature, prompt_tokens, completion_tokens, conversation_id, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [id, entry.user_id, entry.model_id, entry.feature, entry.prompt_tokens || 0, entry.completion_tokens || 0, entry.conversation_id || null, new Date().toISOString()]
     );
+  },
+
+  /** 按对话聚合 token 用量（当前用户），供对话记录页展示 */
+  async getConversationUsage(
+    userId: string
+  ): Promise<Array<{ conversation_id: string; prompt_total: number; completion_total: number; calls: number }>> {
+    const rows = await allAsync(
+      `SELECT conversation_id,
+              SUM(prompt_tokens) as prompt_total,
+              SUM(completion_tokens) as completion_total,
+              COUNT(*) as calls
+       FROM user_ai_usage_logs
+       WHERE user_id = ? AND conversation_id IS NOT NULL
+       GROUP BY conversation_id`,
+      [userId]
+    );
+    return rows as Array<{ conversation_id: string; prompt_total: number; completion_total: number; calls: number }>;
   },
 
   /**

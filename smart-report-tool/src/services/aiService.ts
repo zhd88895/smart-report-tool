@@ -34,6 +34,8 @@ export interface SendMessageResult {
 /** 发送消息的可选参数：enableTools 开启后端工具调用循环 */
 export interface SendMessageOptions {
   enableTools?: boolean;
+  /** 所属对话 ID（AI 助手场景），后端写入用量日志用于对话级 token 统计 */
+  conversationId?: string;
 }
 
 /** 把后端 /ai/chat(+stream 降级) 的 JSON 响应体规整为 SendMessageResult */
@@ -79,7 +81,7 @@ export async function sendMessage(
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     credentials: 'include',
-    body: JSON.stringify({ messages, modelId, enableTools: opts?.enableTools }),
+    body: JSON.stringify({ messages, modelId, enableTools: opts?.enableTools, conversationId: opts?.conversationId }),
   });
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
@@ -106,7 +108,7 @@ export async function sendMessageStream(
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     credentials: 'include',
-    body: JSON.stringify({ messages, modelId, enableTools: opts?.enableTools }),
+    body: JSON.stringify({ messages, modelId, enableTools: opts?.enableTools, conversationId: opts?.conversationId }),
   });
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));

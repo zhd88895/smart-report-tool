@@ -2,7 +2,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard, FileText, ClipboardList, Download, Bot,
   Users, Settings, SlidersHorizontal, ChevronLeft, ChevronRight,
-  Database, Sparkles, MessageSquare, FileSearch, FileBarChart,
+  Database, Sparkles, FileSearch, FileBarChart,
 } from 'lucide-react';
 import { useAuthStore } from '@/stores/authStore';
 import { useUIStore } from '@/stores/uiStore';
@@ -39,7 +39,6 @@ const menuGroups: MenuGroup[] = [
       { icon: FileSearch, path: ROUTES.REPORT_CREATE, feature: 'reportCreate' },
       // 与脚本报告共用 /reports 页面，?tab=ai 只看 AI 生成的报告
       { icon: FileBarChart, path: ROUTES.REPORTS, search: '?tab=ai', label: 'AI报告', feature: 'reports' },
-      { icon: MessageSquare, path: ROUTES.CONVERSATIONS, feature: 'conversations' },
       { icon: Database, path: ROUTES.KNOWLEDGE_BASE, feature: 'settings' },
     ],
   },

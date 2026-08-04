@@ -73,7 +73,7 @@ export default function AssistantPage() {
     const history = currentConversation.messages || [];
     setStreamingText('');
     // enableTools（hook 内默认开启）：响应可能携带工具轨迹 toolCalls 与待确认 pendingConfirm
-    const result = await sendStream(message, history, (chunk) => setStreamingText((p) => p + chunk));
+    const result = await sendStream(message, history, (chunk) => setStreamingText((p) => p + chunk), currentConversation.id);
     setStreamingText('');
     const aiMsg = {
       role: 'assistant' as const,

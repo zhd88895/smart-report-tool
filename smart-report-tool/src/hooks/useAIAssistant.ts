@@ -13,14 +13,14 @@ export function useAIAssistant() {
   const [error, setError] = useState<string | null>(null);
 
   const send = useCallback(
-    async (message: string, history: ConversationMessage[] = []): Promise<SendMessageResult> => {
+    async (message: string, history: ConversationMessage[] = [], conversationId?: string): Promise<SendMessageResult> => {
       setIsLoading(true);
       setError(null);
       try {
         // 从配置 store 取会话级选择的模型 id（null 表示用服务端默认）
         const modelId = useAIConfigStore.getState().selectedModelId ?? undefined;
         // enableTools：开启后端工具循环（只读工具 + 写/执行工具待确认流）
-        const result = await sendMessage(message, history, modelId, { enableTools: true });
+        const result = await sendMessage(message, history, modelId, { enableTools: true, conversationId });
         setIsLoading(false);
         return result;
       } catch (e) {
@@ -37,7 +37,8 @@ export function useAIAssistant() {
     async (
       message: string,
       history: ConversationMessage[] = [],
-      onChunk?: (text: string) => void
+      onChunk?: (text: string) => void,
+      conversationId?: string
     ): Promise<SendMessageResult> => {
       setIsLoading(true);
       setError(null);
@@ -47,7 +48,7 @@ export function useAIAssistant() {
         // enableTools：后端流式工具循环（文本增量实时推送 + tool_call/final 事件），
         // aiService 内部解析 SSE 并逐段回调 onChunk
         const result = await sendMessageStream(message, history, (chunk) => onChunk?.(chunk), modelId, {
-          enableTools: true,
+          enableTools: true, conversationId,
         });
         setIsLoading(false);
         return result;
