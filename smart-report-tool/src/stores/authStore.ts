@@ -27,6 +27,16 @@ const DEFAULT_IDLE_TIMEOUT_MS = 29 * 60 * 1000;
 let idleTimeoutMs = DEFAULT_IDLE_TIMEOUT_MS;
 
 /**
+ * “记住我”会话标记（localStorage）
+ * 持久会话（7 天免登录）不参与前端空闲登出，由长期 Cookie 自身有效期管理
+ */
+const REMEMBER_FLAG_KEY = 'smart_report_remember_me';
+
+function isRememberMeSession(): boolean {
+  return localStorage.getItem(REMEMBER_FLAG_KEY) === '1';
+}
+
+/**
  * 从后端公开配置同步会话超时设置（系统设置页 system.sessionTimeout），
  * 前端空闲登出比后端早 1 分钟，保证用户先收到友好的登出跳转
  */
@@ -66,11 +76,16 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     const result = await authLogin(username, password, rememberMe);
     if (result.user) {
       set({ user: result.user, isAuthenticated: true, isLoading: false });
+      // 记录本次登录是否为“记住我”持久会话
+      localStorage.setItem(REMEMBER_FLAG_KEY, rememberMe ? '1' : '0');
       // 登录新账号时清空上一个账号的对话状态
       useConversationStore.getState().resetConversations();
       // 登录成功后初始化空闲检测（并同步服务端会话超时设置）
+      // “记住我”持久会话不做前端空闲登出，由 7 天长期 Cookie 管理
       refreshIdleTimeout();
-      startIdleDetection();
+      if (!rememberMe) {
+        startIdleDetection();
+      }
       return { success: true };
     }
     return { success: false, error: result.error };
@@ -80,6 +95,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     // 调用后端 API 销毁会话
     await authLogout();
     set({ user: null, isAuthenticated: false, isLoading: false });
+    // 清除“记住我”标记
+    localStorage.removeItem(REMEMBER_FLAG_KEY);
     // 清空当前账号的对话状态
     useConversationStore.getState().resetConversations();
     // 停止空闲检测
@@ -109,11 +126,15 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     checkAuthStatus().then((isValid) => {
       if (isValid && cachedUser) {
         set({ user: cachedUser, isAuthenticated: true, isLoading: false });
-        startIdleDetection();
+        // “记住我”持久会话不做前端空闲登出
+        if (!isRememberMeSession()) {
+          startIdleDetection();
+        }
       } else {
         // 会话无效，清除本地缓存
         if (cachedUser) {
           localStorage.removeItem('smart_report_current_user');
+          localStorage.removeItem(REMEMBER_FLAG_KEY);
         }
         set({ user: null, isAuthenticated: false, isLoading: false });
       }
@@ -135,6 +156,15 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     window.addEventListener('keydown', onUserActivity);
     window.addEventListener('touchstart', onUserActivity);
     window.addEventListener('scroll', onUserActivity);
+
+    // 窗口重新获得焦点时视为活动，并重新同步服务端超时设置
+    // （覆盖在其它标签页修改 system.sessionTimeout 的场景）
+    window.removeEventListener('focus', onWindowFocus);
+    window.addEventListener('focus', onWindowFocus);
+
+    // 系统设置保存成功后立即重新同步超时设置（当前标签页即时生效）
+    window.removeEventListener('auth:refresh-idle-timeout', onRefreshIdleTimeout);
+    window.addEventListener('auth:refresh-idle-timeout', onRefreshIdleTimeout);
 
     // 同步服务端会话超时设置
     refreshIdleTimeout();
@@ -160,19 +190,42 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
 let lastActivityTime = Date.now();
 let idleCheckTimer: ReturnType<typeof setInterval> | null = null;
+// 空闲检测 tick 计数：每 10 个 tick（10 分钟）重新同步一次服务端超时设置
+let idleTickCount = 0;
 
 function onUserActivity(): void {
   lastActivityTime = Date.now();
 }
 
+/**
+ * 窗口重新获得焦点：视为用户活动，并立即重新同步服务端超时设置。
+ * 解决“登录后在系统设置里改了超时时间，但当前标签页仍按旧值倒计时”的问题。
+ */
+function onWindowFocus(): void {
+  lastActivityTime = Date.now();
+  refreshIdleTimeout();
+}
+
+/** 系统设置保存后触发：立即重新同步空闲超时 */
+function onRefreshIdleTimeout(): void {
+  refreshIdleTimeout();
+}
+
 function startIdleDetection(): void {
   lastActivityTime = Date.now();
+  idleTickCount = 0;
 
   if (idleCheckTimer) {
     clearInterval(idleCheckTimer);
   }
 
   idleCheckTimer = setInterval(() => {
+    // 定期重新同步服务端超时设置，让系统设置的修改无需重新登录即可生效
+    idleTickCount += 1;
+    if (idleTickCount % 10 === 0) {
+      refreshIdleTimeout();
+    }
+
     const elapsed = Date.now() - lastActivityTime;
 
     if (elapsed >= idleTimeoutMs) {
@@ -183,6 +236,7 @@ function startIdleDetection(): void {
       // 调用后端登出
       authLogout().then(() => {
         localStorage.removeItem('smart_report_current_user');
+        localStorage.removeItem(REMEMBER_FLAG_KEY);
         useAuthStore.setState({ user: null, isAuthenticated: false, isLoading: false });
         useConversationStore.getState().resetConversations();
         // 触发 401 事件让页面跳转到登录

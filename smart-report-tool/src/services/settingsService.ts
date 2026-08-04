@@ -46,6 +46,8 @@ export async function updateSettings(updates: Array<{ key: string; value: string
     const data = await res.json().catch(() => ({}));
     throw new Error(data.message || '更新设置失败');
   }
+  // 设置保存成功，通知认证模块立即重新同步会话超时等运行参数
+  window.dispatchEvent(new CustomEvent('auth:refresh-idle-timeout'));
 }
 
 export async function fetchHistory(limit = 30): Promise<SettingHistoryEntry[]> {
