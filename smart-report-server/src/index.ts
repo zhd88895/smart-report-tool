@@ -347,7 +347,7 @@ async function start(): Promise<void> {
   startupLogger.info(`  日志格式: ${config.LOG_FORMAT}`);
   startupLogger.info(`  允许来源: ${config.ALLOWED_ORIGINS.join(', ')}`);
   startupLogger.info(`  JWT过期: ${config.JWT_EXPIRES_IN}`);
-  startupLogger.info(`  会话超时: ${config.SESSION_EXPIRY_MINUTES}分钟`);
+  startupLogger.info(`  会话超时: ${settingsService.getNumber('system.sessionTimeout', config.SESSION_EXPIRY_MINUTES)}分钟`);
   startupLogger.info(`  记住我天数: ${config.REMEMBER_ME_DAYS}天`);
   startupLogger.info(`  实例ID: ${config.SERVER_INSTANCE_ID.slice(0, 20)}...`);
   startupLogger.info(`  bcrypt轮数: ${config.BCRYPT_ROUNDS}`);
