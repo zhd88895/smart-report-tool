@@ -11,6 +11,7 @@ import { Router, Request, Response } from 'express';
 import { scriptService } from '../services/scriptService';
 import { authenticate, authorize } from '../middleware/auth';
 import { uploadScriptFiles } from '../middleware/upload';
+import { settingsService } from '../services/settingsService';
 import { fileManager } from '../utils/file';
 import { ApiResponse, safeErrorMessage } from '../types';
 import { existsSync, createReadStream } from 'fs';
@@ -139,9 +140,11 @@ export class ScriptRoutes {
         return;
       }
 
-      // 主文件大小限制：5MB
-      if (scriptFile.size > 5 * 1024 * 1024) {
-        throw new Error('脚本文件大小超过 5MB 限制');
+      // 文件大小限制：从系统设置动态读取 storage.uploadLimit（单位 MB）
+      const uploadLimitMB = settingsService.getNumber('storage.uploadLimit', 50);
+      const maxFileSizeBytes = uploadLimitMB * 1024 * 1024;
+      if (scriptFile.size > maxFileSizeBytes) {
+        throw new Error(`脚本文件大小超过 ${uploadLimitMB}MB 限制`);
       }
 
       // 收集并校验辅助文件
@@ -162,8 +165,8 @@ export class ScriptRoutes {
         const aux = files?.[key]?.[0];
         if (!aux) continue;
 
-        if (aux.size > 10 * 1024 * 1024) {
-          throw new Error(`辅助文件 ${aux.originalname} 超过 10MB 限制`);
+        if (aux.size > maxFileSizeBytes) {
+          throw new Error(`辅助文件 ${aux.originalname} 超过 ${uploadLimitMB}MB 限制`);
         }
         if (!fileManager.validateFileName(aux.originalname)) {
           throw new Error(`辅助文件名无效: ${aux.originalname}`);
@@ -194,8 +197,8 @@ export class ScriptRoutes {
         for (const key of scriptKeys) {
           const f = files?.[key]?.[0];
           if (!f) continue;
-          if (f.size > 5 * 1024 * 1024) {
-            throw new Error(`额外脚本文件 ${f.originalname} 超过 5MB 限制`);
+          if (f.size > maxFileSizeBytes) {
+            throw new Error(`额外脚本文件 ${f.originalname} 超过 ${uploadLimitMB}MB 限制`);
           }
           extraScriptFiles.push({
             filename: f.originalname,
@@ -342,11 +345,12 @@ export class ScriptRoutes {
       .sort((a, b) => parseInt(a.replace('auxFile', '')) - parseInt(b.replace('auxFile', '')));
 
     const result: Array<{ filename: string; path: string; size: number }> = [];
+    const uploadLimitMB = settingsService.getNumber('storage.uploadLimit', 50);
     for (const key of auxKeys) {
       const aux = files[key]?.[0];
       if (!aux) continue;
-      if (aux.size > 10 * 1024 * 1024) {
-        throw new Error(`辅助文件 ${aux.originalname} 超过 10MB 限制`);
+      if (aux.size > uploadLimitMB * 1024 * 1024) {
+        throw new Error(`辅助文件 ${aux.originalname} 超过 ${uploadLimitMB}MB 限制`);
       }
       if (!fileManager.validateFileName(aux.originalname)) {
         throw new Error(`辅助文件名无效: ${aux.originalname}`);

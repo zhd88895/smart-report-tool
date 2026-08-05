@@ -72,7 +72,6 @@ const REMEMBER_COOKIE_NAME = 'sid_r'; // 长期"记住我" Cookie
  * 开发环境下 Secure=false（本地 HTTP），生产环境 Secure=true
  */
 function getCookieOptions(rememberMe: boolean = false): any {
-  const config = getConfig();
   const isProduction = process.env.NODE_ENV === 'production';
 
   return {
@@ -81,8 +80,8 @@ function getCookieOptions(rememberMe: boolean = false): any {
     sameSite: isProduction ? 'strict' as const : 'lax' as const, // CSRF 防护
     path: '/',
     // 短期会话：不设置 maxAge → 关闭浏览器即失效
-    // 记住我：设定过期时间
-    ...(rememberMe ? { maxAge: config.REMEMBER_ME_DAYS * 24 * 60 * 60 * 1000 } : {}),
+    // 记住我：设定过期时间（取系统设置 system.rememberMeDays，默认 7 天，可在系统设置页调整，即时生效）
+    ...(rememberMe ? { maxAge: settingsService.getNumber('system.rememberMeDays', 7) * 24 * 60 * 60 * 1000 } : {}),
   };
 }
 

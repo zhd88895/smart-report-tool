@@ -12,6 +12,7 @@ import { templateRepository } from '../db/repositories';
 import { fileManager, safeMoveFile } from '../utils/file';
 import { authenticate, authorize } from '../middleware/auth';
 import { uploadTemplateFile } from '../middleware/upload';
+import { settingsService } from '../services/settingsService';
 import { ApiResponse, safeErrorMessage } from '../types';
 import fs from 'fs/promises';
 import { existsSync, mkdirSync, createReadStream } from 'fs';
@@ -114,9 +115,10 @@ export class TemplateRoutes {
         return;
       }
 
-      // 模板文件大小限制：20MB
-      if (file.size > 20 * 1024 * 1024) {
-        throw new Error('模板文件大小超过 20MB 限制');
+      // 模板文件大小限制：从系统设置动态读取 storage.uploadLimit（单位 MB）
+      const uploadLimitMB = settingsService.getNumber('storage.uploadLimit', 50);
+      if (file.size > uploadLimitMB * 1024 * 1024) {
+        throw new Error(`模板文件大小超过 ${uploadLimitMB}MB 限制`);
       }
 
       // 验证文件名

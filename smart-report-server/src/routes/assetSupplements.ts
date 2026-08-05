@@ -31,6 +31,7 @@ import path from 'path';
 import fs from 'fs/promises';
 import { existsSync, mkdirSync } from 'fs';
 import { getConfig } from '../config';
+import { settingsService } from '../services/settingsService';
 
 const log = getLogger('AssetSupplementsRoute', 'other');
 
@@ -55,37 +56,49 @@ const storage = multer.diskStorage({
   }
 });
 
-const upload = multer({ 
-  storage,
-  limits: { fileSize: 50 * 1024 * 1024 }, // 50MB限制
-  fileFilter: (req, file, cb) => {
-    // 允许的文件类型
-    const allowedTypes = [
-      'text/plain', 'text/csv', 'text/xml', 'text/html',
-      'application/json', 'application/xml', 'application/vnd.ms-excel',
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-      'application/pdf'
-    ];
-    
-    if (allowedTypes.includes(file.mimetype) || 
-        file.originalname.endsWith('.log') || 
-        file.originalname.endsWith('.txt') ||
-        file.originalname.endsWith('.csv') ||
-        file.originalname.endsWith('.xml') ||
-        file.originalname.endsWith('.html') ||
-        file.originalname.endsWith('.json') ||
-        file.originalname.endsWith('.xlsx') ||
-        file.originalname.endsWith('.xls') ||
-        file.originalname.endsWith('.docx') ||
-        file.originalname.endsWith('.doc') ||
-        file.originalname.endsWith('.pdf')) {
-      cb(null, true);
-    } else {
-      cb(new Error('不支持的文件类型'));
-    }
+// multer 的 fileSize 只能静态设置，这里缓存实例并在设置变化时重建，
+// 使 storage.uploadLimit 系统设置（MB）调整后可即时生效
+let cachedLimitMB = -1;
+let cachedUpload: multer.Multer | null = null;
+
+function getUpload(): multer.Multer {
+  const limitMB = settingsService.getNumber('storage.uploadLimit', 50);
+  if (!cachedUpload || cachedLimitMB !== limitMB) {
+    cachedUpload = multer({
+      storage,
+      limits: { fileSize: limitMB * 1024 * 1024 },
+      fileFilter: (req, file, cb) => {
+        // 允许的文件类型
+        const allowedTypes = [
+          'text/plain', 'text/csv', 'text/xml', 'text/html',
+          'application/json', 'application/xml', 'application/vnd.ms-excel',
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          'application/pdf'
+        ];
+
+        if (allowedTypes.includes(file.mimetype) ||
+            file.originalname.endsWith('.log') ||
+            file.originalname.endsWith('.txt') ||
+            file.originalname.endsWith('.csv') ||
+            file.originalname.endsWith('.xml') ||
+            file.originalname.endsWith('.html') ||
+            file.originalname.endsWith('.json') ||
+            file.originalname.endsWith('.xlsx') ||
+            file.originalname.endsWith('.xls') ||
+            file.originalname.endsWith('.docx') ||
+            file.originalname.endsWith('.doc') ||
+            file.originalname.endsWith('.pdf')) {
+          cb(null, true);
+        } else {
+          cb(new Error('不支持的文件类型'));
+        }
+      }
+    });
+    cachedLimitMB = limitMB;
   }
-});
+  return cachedUpload;
+}
 
 export const assetSupplementRoutes = Router();
 
@@ -147,7 +160,7 @@ assetSupplementRoutes.post('/', authMiddleware, async (req: Request, res: Respon
  * 上传资产补充文件
  * POST /api/asset-supplements/upload
  */
-assetSupplementRoutes.post('/upload', authMiddleware, upload.single('file'), async (req: Request, res: Response) => {
+assetSupplementRoutes.post('/upload', authMiddleware, (req: Request, res: Response, next: NextFunction) => getUpload().single('file')(req, res, next), async (req: Request, res: Response) => {
   const traceId = generateTraceId();
   log.info('上传资产补充文件', traceId);
   

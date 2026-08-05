@@ -10,12 +10,13 @@
  * @module routes/knowledgeBase
  */
 
-import { Router, Request, Response } from 'express';
+import { Router, Request, Response, NextFunction } from 'express';
 import { authenticate } from '../middleware/auth';
 import { knowledgeBaseRepository, KBCategory, KBFile } from '../db/repositories/knowledgeBaseRepository';
 import { ApiResponse } from '../types';
 import { getLogger, generateTraceId } from '../utils/logger';
 import { getConfig } from '../config';
+import { settingsService } from '../services/settingsService';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs/promises';
@@ -37,7 +38,6 @@ if (!existsSync(KB_UPLOAD_DIR)) {
 }
 
 const ALLOWED_EXTS = new Set(['.md', '.markdown', '.html', '.htm', '.docx', '.doc', '.pdf', '.txt', '.text']);
-const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20MB
 
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, KB_UPLOAD_DIR),
@@ -48,18 +48,30 @@ const storage = multer.diskStorage({
   },
 });
 
-const upload = multer({
-  storage,
-  limits: { fileSize: MAX_FILE_SIZE },
-  fileFilter: (_req, file, cb) => {
-    const ext = path.extname(file.originalname).toLowerCase();
-    if (ALLOWED_EXTS.has(ext)) {
-      cb(null, true);
-    } else {
-      cb(new Error(`不支持的文件格式: ${ext}。支持: MD, HTML, Word, PDF, TXT`));
-    }
-  },
-});
+// multer 的 fileSize 只能静态设置，这里缓存实例并在设置变化时重建，
+// 使 storage.uploadLimit 系统设置（MB）调整后可即时生效
+let cachedLimitMB = -1;
+let cachedUpload: multer.Multer | null = null;
+
+function getUpload(): multer.Multer {
+  const limitMB = settingsService.getNumber('storage.uploadLimit', 50);
+  if (!cachedUpload || cachedLimitMB !== limitMB) {
+    cachedUpload = multer({
+      storage,
+      limits: { fileSize: limitMB * 1024 * 1024 },
+      fileFilter: (_req, file, cb) => {
+        const ext = path.extname(file.originalname).toLowerCase();
+        if (ALLOWED_EXTS.has(ext)) {
+          cb(null, true);
+        } else {
+          cb(new Error(`不支持的文件格式: ${ext}。支持: MD, HTML, Word, PDF, TXT`));
+        }
+      },
+    });
+    cachedLimitMB = limitMB;
+  }
+  return cachedUpload;
+}
 
 // ═══════════════════════════════════════════════════════
 //  文件解析
@@ -255,7 +267,7 @@ router.get('/files/search', authenticate, async (req: Request, res: Response) =>
 });
 
 // 上传文件
-router.post('/files/upload', authenticate, upload.single('file'), async (req: Request, res: Response) => {
+router.post('/files/upload', authenticate, (req: Request, res: Response, next: NextFunction) => getUpload().single('file')(req, res, next), async (req: Request, res: Response) => {
   const traceId = generateTraceId();
   const file = req.file;
   const { categoryId, title } = req.body;

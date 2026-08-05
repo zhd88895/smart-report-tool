@@ -16,7 +16,7 @@ import { settingsService } from '../services/settingsService';
  * 环境变量 ALLOWED_ORIGINS 为基础，叠加系统设置 security.corsOrigin
  * （逗号分隔，可在系统设置页调整，即时生效；用于追加来源，不会移除环境变量配置的来源）
  */
-function resolveAllowedOrigins(base: string[]): string[] {
+export function resolveAllowedOrigins(base: string[]): string[] {
   const extra = settingsService.get('security.corsOrigin');
   if (!extra) return base;
   const extras = extra.split(',').map((s) => s.trim()).filter(Boolean);

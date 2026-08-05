@@ -21,7 +21,7 @@ import cookieParser from 'cookie-parser';
 import rateLimit from 'express-rate-limit';
 import { loadConfig, getConfig } from './config';
 import { logger, getLogger, generateTraceId, LogLevel, Logger } from './utils/logger';
-import { corsMiddleware } from './middleware/cors';
+import { corsMiddleware, resolveAllowedOrigins } from './middleware/cors';
 import { sanitizeInputMiddleware } from './middleware/security';
 import { ApiResponse } from './types';
 import { initializeDatabase } from './db/init';
@@ -115,10 +115,10 @@ app.use((req: Request, _res: Response, next: NextFunction): void => {
 //  速率限制（安全加固）
 // ═══════════════════════════════════════════════════════
 
-/** 认证端点限流：登录/注册每分钟最多 5 次 */
+/** 认证端点限流：登录/注册每分钟次数上限取系统设置 security.authRateLimit（默认 5，可在系统设置页调整，即时生效） */
 const authLimiter = rateLimit({
   windowMs: 60 * 1000,
-  max: 5,
+  limit: () => settingsService.getNumber('security.authRateLimit', 5),
   standardHeaders: true,
   legacyHeaders: false,
   message: {
@@ -129,10 +129,10 @@ const authLimiter = rateLimit({
   },
 });
 
-/** 通用 API 限流：每分钟次数上限取系统设置 security.rateLimit（默认 60，可在系统设置页调整，即时生效） */
+/** 通用 API 限流：每分钟次数上限取系统设置 security.rateLimit（默认 100，可在系统设置页调整，即时生效） */
 const apiLimiter = rateLimit({
   windowMs: 60 * 1000,
-  limit: () => settingsService.getNumber('security.rateLimit', 60),
+  limit: () => settingsService.getNumber('security.rateLimit', 100),
   standardHeaders: true,
   legacyHeaders: false,
   message: {
@@ -345,10 +345,10 @@ async function start(): Promise<void> {
   startupLogger.info(`  数据目录: ${config.DATA_DIR}`);
   startupLogger.info(`  日志目录: ${config.LOGS_DIR}`);
   startupLogger.info(`  日志格式: ${config.LOG_FORMAT}`);
-  startupLogger.info(`  允许来源: ${config.ALLOWED_ORIGINS.join(', ')}`);
+  startupLogger.info(`  允许来源: ${resolveAllowedOrigins(config.ALLOWED_ORIGINS).join(', ')}`);
   startupLogger.info(`  JWT过期: ${config.JWT_EXPIRES_IN}`);
   startupLogger.info(`  会话超时: ${settingsService.getNumber('system.sessionTimeout', config.SESSION_EXPIRY_MINUTES)}分钟`);
-  startupLogger.info(`  记住我天数: ${config.REMEMBER_ME_DAYS}天`);
+  startupLogger.info(`  记住我天数: ${settingsService.getNumber('system.rememberMeDays', 7)}天`);
   startupLogger.info(`  实例ID: ${config.SERVER_INSTANCE_ID.slice(0, 20)}...`);
   startupLogger.info(`  bcrypt轮数: ${config.BCRYPT_ROUNDS}`);
   startupLogger.info(`  环境: ${process.env.NODE_ENV || 'development'}`);

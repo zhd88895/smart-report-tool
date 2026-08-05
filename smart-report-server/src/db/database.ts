@@ -394,6 +394,9 @@ async function createSchema(): Promise<void> {
   // 迁移：为已存在的库补充上传扩展名配置（seed 只在空库时执行）
   await migrateUploadExtensionSettings();
 
+  // 迁移：为已存在的库补充运行时动态配置（记住我天数、登录注册限流等，INSERT OR IGNORE 幂等）
+  await migrateRuntimeSettings();
+
   // 迁移：上传文件 hash 去重索引表（内容寻址存储 data/uploads/dedup/）
   await runAsync(`CREATE TABLE IF NOT EXISTS file_hashes (
     hash TEXT PRIMARY KEY,
@@ -664,6 +667,7 @@ async function seedDefaultSettings(): Promise<void> {
       { key: 'system.sessionTimeout', value: '30', category: 'system', label: '会话超时（分钟）', description: '用户空闲超时自动登出，调整后即时生效', value_type: 'number', sort_order: 1 },
       { key: 'system.dataDir', value: 'data', category: 'system', label: '数据目录', value_type: 'string', sort_order: 2 },
       { key: 'system.logLevel', value: 'info', category: 'system', label: '日志级别', value_type: 'select', options: JSON.stringify(['debug','info','warn','error']), sort_order: 3 },
+      { key: 'system.rememberMeDays', value: '7', category: 'system', label: '记住我天数', description: '勾选记住登录状态后的免登录天数，调整后即时生效', value_type: 'number', sort_order: 4 },
       { key: 'storage.uploadLimit', value: '50', category: 'storage', label: '上传文件大小限制（MB）', description: '脚本/模板/报告等上传单文件上限，调整后即时生效', value_type: 'number', sort_order: 1 },
       { key: 'storage.retentionDays', value: '90', category: 'storage', label: '文件保留天数', description: '临时上传文件超过 N 天未使用自动删除，调整后于下次清理周期生效', value_type: 'number', sort_order: 2 },
       { key: 'storage.archiveExtensions', value: '.zip,.tar,.gz,.tgz,.tar.gz,.tar.bz2,.tar.xz', category: 'storage', label: '压缩包扩展名', description: '支持包/压缩包允许上传的扩展名，逗号分隔（如 sds），开头的点可省略，系统自动补全；解压按文件实际格式自动识别', value_type: 'string', sort_order: 3 },
@@ -671,6 +675,7 @@ async function seedDefaultSettings(): Promise<void> {
       { key: 'security.adminPassword', value: 'SmartReport@2026', category: 'security', label: '管理员初始密码', value_type: 'string', is_secret: 1, sort_order: 1 },
       { key: 'security.rateLimit', value: '100', category: 'security', label: '速率限制（次/分钟）', description: '通用 API 每 IP 每分钟请求上限，调整后即时生效', value_type: 'number', sort_order: 2 },
       { key: 'security.corsOrigin', value: '', category: 'security', label: 'CORS 额外允许源', description: '在环境变量基础上追加允许的跨域来源，多个用逗号分隔，支持 *.example.com 通配', value_type: 'string', sort_order: 3 },
+      { key: 'security.authRateLimit', value: '5', category: 'security', label: '登录注册限流（次/分钟）', description: '登录和注册接口每 IP 每分钟请求上限，调整后即时生效', value_type: 'number', sort_order: 4 },
       { key: 'logs.format', value: 'text', category: 'logs', label: '日志格式', value_type: 'select', options: JSON.stringify(['text','json']), sort_order: 1 },
       { key: 'logs.retentionDays', value: '30', category: 'logs', label: '日志保留天数', value_type: 'number', sort_order: 2 },
       { key: 'notification.smtpHost', value: '', category: 'notification', label: 'SMTP 服务器', value_type: 'string', sort_order: 1 },
@@ -685,7 +690,7 @@ async function seedDefaultSettings(): Promise<void> {
         [s.key, s.value, s.category, s.label, s.description || '', s.value_type, s.options || null, s.is_secret || 0, s.sort_order, now]
       );
     }
-    logger.info('数据库迁移: settings 表已填充默认配置（13 项）');
+    logger.info('数据库迁移: settings 表已填充默认配置（15 项）');
   } catch (e: any) {
     logger.warn(`settings 种子数据填充跳过: ${e.message}`);
   }
@@ -714,9 +719,11 @@ async function cleanupDeadAISettings(): Promise<void> {
  *
  * 已接入功能（不再隐藏，调整即时生效）：
  * - system.sessionTimeout → middleware/auth.ts 会话空闲超时
+ * - system.rememberMeDays → middleware/auth.ts 记住我 Cookie 有效期
  * - storage.uploadLimit   → middleware/upload.ts 上传文件大小限制
  * - storage.retentionDays → fileCleanupService 临时文件保留清理
  * - security.rateLimit    → index.ts 通用 API 限流
+ * - security.authRateLimit→ index.ts 登录/注册限流
  * - security.corsOrigin   → middleware/cors.ts 追加允许来源
  */
 const PLACEHOLDER_SETTING_KEYS = [
@@ -786,6 +793,30 @@ async function migrateUploadExtensionSettings(): Promise<void> {
     }
   } catch (e: any) {
     logger.warn(`上传扩展名配置补插跳过: ${e.message}`);
+  }
+}
+
+/**
+ * 迁移：为已存在的库补充运行时动态配置
+ * （system.rememberMeDays 记住我天数、security.authRateLimit 登录注册限流；
+ *  seedDefaultSettings 仅在空库执行，老库需要在这里补插，INSERT OR IGNORE 幂等）
+ */
+async function migrateRuntimeSettings(): Promise<void> {
+  const now = new Date().toISOString();
+  const items = [
+    { key: 'system.rememberMeDays', value: '7', category: 'system', label: '记住我天数', description: '勾选记住登录状态后的免登录天数，调整后即时生效', value_type: 'number', sort_order: 4 },
+    { key: 'security.authRateLimit', value: '5', category: 'security', label: '登录注册限流（次/分钟）', description: '登录和注册接口每 IP 每分钟请求上限，调整后即时生效', value_type: 'number', sort_order: 4 },
+  ];
+  try {
+    for (const s of items) {
+      await runAsync(
+        `INSERT OR IGNORE INTO settings (key, value, category, label, description, value_type, options, editable_by, is_secret, sort_order, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, NULL, 'admin', 0, ?, ?)`,
+        [s.key, s.value, s.category, s.label, s.description, s.value_type, s.sort_order, now]
+      );
+    }
+  } catch (e: any) {
+    logger.warn(`运行时动态配置补插跳过: ${e.message}`);
   }
 }
 export function runAsync(sql: string, params: any[] = []): Promise<sqlite3.RunResult> {
