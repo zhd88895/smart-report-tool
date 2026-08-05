@@ -71,6 +71,8 @@ export interface Script {
   pythonVersion?: string;
   /** 是否为多文件脚本模式 */
   isMultiFile?: boolean;
+  /** 自定义报告命名模板（空字符串表示使用默认命名 报告_YYYY-MM-DD） */
+  reportNameTemplate?: string;
   /** 上传时间 */
   uploadedAt: string;
   /** 上传者 */
@@ -304,6 +306,7 @@ export class ScriptService {
       uploadedBy?: string;
       pythonVersion?: string;
       isMultiFile?: boolean;
+      reportNameTemplate?: string;
       auxiliaryFiles?: Array<{
         filename: string;
         path: string;
@@ -438,6 +441,7 @@ export class ScriptService {
       },
       pythonVersion: metadata.pythonVersion || 'embedded',
       isMultiFile: metadata.isMultiFile || false,
+      reportNameTemplate: metadata.reportNameTemplate || '',
       uploadedAt: new Date().toISOString(),
       uploadedBy: metadata.uploadedBy || 'unknown',
     };
@@ -490,6 +494,7 @@ export class ScriptService {
       depsStatus: Script['depsStatus'];
       auxiliaryFiles: AuxiliaryFile[];
       isMultiFile: boolean;
+      reportNameTemplate: string;
       extraFiles: ExtraFile[];
       entryName: string;
     }>

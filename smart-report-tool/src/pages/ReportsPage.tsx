@@ -178,7 +178,8 @@ export default function ReportsPage() {
       // Tab筛选：根据 activeTab 过滤报告来源
       const expectSource = activeTab === 'ai' ? 'ai' : 'script';
       const matchSource = (r.reportSource || 'script') === expectSource;
-      const matchSearch = r.name.toLowerCase().includes(searchQuery.toLowerCase());
+      const q = searchQuery.toLowerCase();
+      const matchSearch = r.name.toLowerCase().includes(q) || (r.reportNo || '').toLowerCase().includes(q);
       const matchType = typeFilter === 'all' || r.type === typeFilter;
       const matchStatus = statusFilter === 'all' || r.status === statusFilter;
       // 日期筛选

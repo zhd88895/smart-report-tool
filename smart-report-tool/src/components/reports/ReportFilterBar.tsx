@@ -74,7 +74,7 @@ export function ReportFilterBar({
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
-              placeholder="搜索报告名称..."
+              placeholder="搜索报告名称或编号..."
               value={searchQuery}
               onChange={(e) => onSearchQueryChange(e.target.value)}
               className="pl-9"

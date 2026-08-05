@@ -106,6 +106,9 @@ export function ReportPreviewDialog({
         <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle>报告文件 - {filesReport?.name}</DialogTitle>
+            {filesReport?.reportNo && (
+              <p className="text-xs text-muted-foreground font-mono">编号：{filesReport.reportNo}</p>
+            )}
           </DialogHeader>
           {!filesLoading && (
             <div className="flex gap-2 pb-1">

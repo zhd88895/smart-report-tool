@@ -229,6 +229,7 @@ export class ScriptRoutes {
           uploadedBy: req.user?.userId,
           pythonVersion: body.pythonVersion || 'embedded',
           isMultiFile,
+          reportNameTemplate: body.reportNameTemplate,
           auxiliaryFiles,
         },
         extraScriptFiles.length > 0 ? extraScriptFiles : undefined
@@ -382,6 +383,7 @@ export class ScriptRoutes {
     if (body.templateIds) data.templateIds = JSON.parse(body.templateIds);
     if (body.requirements) data.requirements = JSON.parse(body.requirements);
     if (body.pythonVersion) data.pythonVersion = body.pythonVersion;
+    if (body.reportNameTemplate !== undefined) data.reportNameTemplate = body.reportNameTemplate;
     if (body.isMultiFile !== undefined) data.isMultiFile = body.isMultiFile === 'true';
     if (body.entryName) data.entryName = body.entryName;
     if (body.existingExtra) {

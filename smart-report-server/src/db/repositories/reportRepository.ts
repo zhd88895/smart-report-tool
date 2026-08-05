@@ -16,6 +16,7 @@ function rowToReport(row: any): Report {
   return {
     id: row.id,
     name: row.name,
+    reportNo: row.report_no || undefined,
     description: row.description || '',
     scriptId: row.script_id,
     scriptName: row.script_name || '',
@@ -63,6 +64,7 @@ function reportToRow(report: Report): any[] {
     report.author || null,
     report.createdAt || null,
     report.reportSource || 'script',
+    report.reportNo || null,
   ];
 }
 
@@ -98,11 +100,20 @@ export const reportRepository = {
     await runAsync(
       `INSERT INTO reports (id, name, description, script_id, script_name, template_id, template_name,
         output_format, workspace_dir, generated_at, generated_by, status, error, logs, file_paths,
-        type, region, date, author, created_at, report_source)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        type, region, date, author, created_at, report_source, report_no)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       reportToRow(report)
     );
     return report;
+  },
+
+  /** 统计指定时间范围内生成的报告数（用于报告编号的当日序列） */
+  async countByDateRange(start: string, end: string): Promise<number> {
+    const row = await getAsync(
+      'SELECT COUNT(*) as cnt FROM reports WHERE generated_at >= ? AND generated_at <= ?',
+      [start, end]
+    );
+    return (row as any)?.cnt ?? 0;
   },
 
   /** 追加日志到现有报告的 logs 数组末尾 */

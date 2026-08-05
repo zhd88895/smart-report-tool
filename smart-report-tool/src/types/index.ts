@@ -77,6 +77,8 @@ export interface Script {
   pythonVersion?: string;
   /** 是否为多文件脚本模式 */
   isMultiFile?: boolean;
+  /** 自定义报告命名模板（空字符串表示使用默认命名） */
+  reportNameTemplate?: string;
   uploadedAt: string;
   uploadedBy: string;
 }
@@ -113,6 +115,8 @@ export interface ExecutionLog {
 export interface Report {
   id: string;
   name: string;
+  /** 报告编号（格式 APL_YYYYMMDD-HHMM_NNNN，全局唯一） */
+  reportNo?: string;
   type: LogCategory;
   date: string;
   author: string;

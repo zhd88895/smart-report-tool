@@ -108,6 +108,7 @@ async function createSchema(): Promise<void> {
       deps_status TEXT,
       python_version TEXT DEFAULT 'embedded',
       is_multi_file INTEGER DEFAULT 0,
+      report_name_template TEXT,
       uploaded_at TEXT NOT NULL,
       uploaded_by TEXT
     );
@@ -148,6 +149,7 @@ async function createSchema(): Promise<void> {
     CREATE TABLE IF NOT EXISTS reports (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
+      report_no TEXT,
       description TEXT,
       script_id TEXT NOT NULL,
       script_name TEXT,
@@ -364,6 +366,34 @@ async function createSchema(): Promise<void> {
     }
   }
 
+  // 迁移：为 scripts 表添加 report_name_template 列（自定义报告命名模板，NULL 表示默认命名）
+  if (!(await columnExists('scripts', 'report_name_template'))) {
+    try {
+      await runAsync('ALTER TABLE scripts ADD COLUMN report_name_template TEXT');
+      logger.info('数据库迁移: 已添加 scripts.report_name_template 列');
+    } catch (error: any) {
+      if (!error.message?.includes('duplicate column name')) {
+        logger.warn(`scripts.report_name_template 列添加跳过: ${error.message}`);
+      }
+    }
+  }
+
+  // 迁移：为 reports 表添加 report_no 列（报告编号，格式 APL_YYYYMMDD-HHMM_NNNN）
+  if (!(await columnExists('reports', 'report_no'))) {
+    try {
+      await runAsync('ALTER TABLE reports ADD COLUMN report_no TEXT');
+      logger.info('数据库迁移: 已添加 reports.report_no 列');
+    } catch (error: any) {
+      if (!error.message?.includes('duplicate column name')) {
+        logger.warn(`reports.report_no 列添加跳过: ${error.message}`);
+      }
+    }
+  }
+  await runAsync('CREATE UNIQUE INDEX IF NOT EXISTS idx_reports_report_no ON reports(report_no)');
+
+  // 迁移：为已有报告回填编号（幂等，仅处理 report_no 为空的记录）
+  await migrateReportNumbers();
+
   // 迁移：为 user_ai_usage_logs 表添加 conversation_id 列（对话级 token 统计）
   try {
     await runAsync('ALTER TABLE user_ai_usage_logs ADD COLUMN conversation_id TEXT');
@@ -410,6 +440,58 @@ async function createSchema(): Promise<void> {
 
   // 迁移：将历史 AI 报告中存储为 userId 的 author 字段更新为显示名
   await migrateReportAuthorsToDisplayName();
+}
+
+/**
+ * 一次性迁移：为历史报告回填编号（APL_YYYYMMDD-HHMM_NNNN）
+ * - 按 generated_at 升序遍历 report_no 为空的报告
+ * - 日期/时间取 generated_at 的本地时间（项目用户在 UTC+8）
+ * - 同一天内从 0001 开始递增序列号
+ * - 幂等：已编号的记录不处理，序列号起始值从已有编号中取最大值
+ */
+async function migrateReportNumbers(): Promise<void> {
+  try {
+    const rows = await allAsync(
+      `SELECT id, generated_at FROM reports WHERE report_no IS NULL OR report_no = '' ORDER BY generated_at ASC`
+    ) as any[];
+    if (rows.length === 0) return;
+
+    // 从已有编号中提取各日期已用的最大序列号，保证幂等重跑时不冲突
+    const dayCounters = new Map<string, number>();
+    const existing = await allAsync(
+      `SELECT report_no FROM reports WHERE report_no IS NOT NULL AND report_no != ''`
+    ) as any[];
+    for (const r of existing) {
+      const m = /^APL_(\d{8})-\d{4}_(\d{4})$/.exec(r.report_no || '');
+      if (m) {
+        const seq = parseInt(m[2], 10);
+        if ((dayCounters.get(m[1]) || 0) < seq) dayCounters.set(m[1], seq);
+      }
+    }
+
+    let updated = 0;
+    for (const row of rows) {
+      const parsed = new Date(row.generated_at);
+      const base = isNaN(parsed.getTime()) ? new Date() : parsed;
+      const year = base.getFullYear();
+      const month = String(base.getMonth() + 1).padStart(2, '0');
+      const day = String(base.getDate()).padStart(2, '0');
+      const hours = String(base.getHours()).padStart(2, '0');
+      const minutes = String(base.getMinutes()).padStart(2, '0');
+      const dateStr = `${year}${month}${day}`;
+      const seq = (dayCounters.get(dateStr) || 0) + 1;
+      dayCounters.set(dateStr, seq);
+      const reportNo = `APL_${dateStr}-${hours}${minutes}_${String(seq).padStart(4, '0')}`;
+      await runAsync('UPDATE reports SET report_no = ? WHERE id = ?', [reportNo, row.id]);
+      updated++;
+    }
+
+    if (updated > 0) {
+      logger.info(`数据库迁移: 已为 ${updated} 条历史报告回填编号`);
+    }
+  } catch (e: any) {
+    logger.warn(`报告编号回填迁移跳过: ${e.message}`);
+  }
 }
 
 /**
@@ -645,8 +727,8 @@ async function migrateAllPathsToRelative(): Promise<void> {
  */
 export async function columnExists(table: string, column: string): Promise<boolean> {
   try {
-    const row = await getAsync(`PRAGMA table_info(${table})`);
-    return !!row;
+    const rows = await allAsync(`PRAGMA table_info(${table})`);
+    return rows.some((r: any) => r.name === column);
   } catch {
     return false;
   }

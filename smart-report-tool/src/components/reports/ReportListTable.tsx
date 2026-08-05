@@ -34,6 +34,13 @@ export function ReportListTable({
   onDelete,
 }: ReportListTableProps) {
   const columns = [
+    {
+      key: 'reportNo',
+      header: '编号',
+      width: '190px',
+      sortable: true,
+      render: (item: Report) => <span className="font-mono text-xs">{item.reportNo || '-'}</span>,
+    },
     { key: 'name', header: '报告名称', sortable: true },
     { key: 'type', header: '类型', sortable: true, render: (item: Report) => LOG_CATEGORY_LABELS[item.type] || AI_EXTRA_TYPE_LABELS[item.type] || item.type || '-' },
     { key: 'region', header: '区域', sortable: true, render: (item: Report) => item.region || '全部' },

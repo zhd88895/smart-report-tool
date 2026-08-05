@@ -110,6 +110,8 @@ export interface Report {
   id: string;
   /** 报告名称 */
   name: string;
+  /** 报告编号（格式 APL_YYYYMMDD-HHMM_NNNN，全局唯一） */
+  reportNo?: string;
   /** 报告描述 */
   description: string;
   /** 脚本ID */
@@ -243,6 +245,101 @@ export class ReportService {
       log.debug(`富化报告作者失败: ${report.id}`, undefined, { author: report.author, error: err instanceof Error ? err.message : String(err) });
     }
     return report;
+  }
+
+  /**
+   * 根据脚本的自定义命名模板生成报告名
+   *
+   * 支持的通配符：
+   * - {date}       → YYYYMMDD（如 20260801）
+   * - {date_dash}  → YYYY-MM-DD（如 2026-08-01）
+   * - {time}       → HHMM（如 0120）
+   * - {datetime}   → YYYYMMDD-HHMM（如 20260801-0120）
+   * - {user_name}  → 生成报告的用户的 displayName
+   * - {script_name}→ 脚本名称
+   *
+   * 模板为空或 NULL 时返回默认命名 `报告_YYYY-MM-DD`
+   */
+  private async resolveReportName(
+    script: any,
+    reportInfo: { name?: string },
+    generatedBy: string,
+    now: Date
+  ): Promise<string> {
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const dateStr = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}`;
+    const dateDashStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+    const timeStr = `${pad(now.getHours())}${pad(now.getMinutes())}`;
+
+    if (reportInfo.name) return reportInfo.name;
+
+    const template = (script?.reportNameTemplate || '').trim();
+    if (!template) return `报告_${dateDashStr}`;
+
+    // {user_name} 需要查询用户显示名
+    let userName = generatedBy;
+    if (template.includes('{user_name}')) {
+      try {
+        const user = await userRepository.findById(generatedBy);
+        if (user) userName = user.displayName || user.username || generatedBy;
+      } catch {
+        // 查询失败时回退为 generatedBy 原值
+      }
+    }
+
+    return template
+      .replace(/\{datetime\}/g, `${dateStr}-${timeStr}`)
+      .replace(/\{date_dash\}/g, dateDashStr)
+      .replace(/\{date\}/g, dateStr)
+      .replace(/\{time\}/g, timeStr)
+      .replace(/\{user_name\}/g, userName)
+      .replace(/\{script_name\}/g, script?.name || '');
+  }
+
+  /**
+   * 生成报告编号：APL_YYYYMMDD-HHMM_NNNN
+   * - 日期/时分取本地时间（项目用户在 UTC+8）
+   * - NNNN 为当天报告数 + 1（四位补零）
+   * @param seqOffset - 唯一冲突重试时的序列号偏移
+   */
+  private async generateReportNo(seqOffset = 0): Promise<string> {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    const hours = String(now.getHours()).padStart(2, '0');
+    const minutes = String(now.getMinutes()).padStart(2, '0');
+    const dateStr = `${year}${month}${day}`;
+    const timeStr = `${hours}${minutes}`;
+
+    // 查询当天已有报告数（本地日期边界转换为 UTC ISO，与 stored generated_at 可比）
+    const dayStart = new Date(year, now.getMonth(), now.getDate(), 0, 0, 0, 0).toISOString();
+    const dayEnd = new Date(year, now.getMonth(), now.getDate(), 23, 59, 59, 999).toISOString();
+    const count = await reportRepository.countByDateRange(dayStart, dayEnd);
+    const seq = String(count + 1 + seqOffset).padStart(4, '0');
+
+    return `APL_${dateStr}-${timeStr}_${seq}`;
+  }
+
+  /**
+   * 创建报告记录，带 report_no 唯一冲突重试（并发下同序列号冲突时递增序列重试）
+   */
+  private async createReportWithRetry(report: Report): Promise<void> {
+    const MAX_ATTEMPTS = 5;
+    for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+      try {
+        await reportRepository.create(report);
+        return;
+      } catch (e: any) {
+        const isReportNoConflict =
+          e?.message?.includes('UNIQUE') && e.message.includes('report_no');
+        if (isReportNoConflict && attempt < MAX_ATTEMPTS - 1) {
+          report.reportNo = await this.generateReportNo(attempt + 1);
+          continue;
+        }
+        throw e;
+      }
+    }
   }
 
   /**
@@ -485,9 +582,13 @@ export class ReportService {
 
     // 创建 DB 记录（立即保存，status: generating）
     const now = new Date().toISOString();
+    // 按脚本自定义命名模板生成报告名（模板为空时保持默认 报告_YYYY-MM-DD）
+    const reportName = await this.resolveReportName(script, reportInfo, generatedBy, new Date(now));
+    const reportNo = await this.generateReportNo();
     const initialReport: Report = {
       id: reportId,
-      name: reportInfo.name || `报告_${now.slice(0, 10)}`,
+      name: reportName,
+      reportNo,
       description: reportInfo.description || '',
       scriptId, scriptName: script.name,
       templateId: template?.id, templateName: template?.fileName,
@@ -504,7 +605,7 @@ export class ReportService {
       author: reportInfo.author || generatedBy,
       createdAt: now,
     };
-    await reportRepository.create(initialReport);
+    await this.createReportWithRetry(initialReport);
 
     // ─── 启动后台执行 ───
     const emitter = new EventEmitter();
@@ -1078,9 +1179,14 @@ export class ReportService {
       // 创建报告记录，只保存有效的报告输出文件路径
       const reportFilePaths = outputFileEntries.map((f) => f.path);
       const now = new Date().toISOString();
+      // 按脚本自定义命名模板生成报告名（模板为空时保持默认 报告_YYYY-MM-DD）
+      const reportName = await this.resolveReportName(script, reportInfo, generatedBy, new Date(now));
+      // 后台模式下编号已在 startBackgroundGeneration 创建记录时生成
+      const reportNo = preWorkspaceDir ? undefined : await this.generateReportNo();
       const report: Report = {
         id: reportId,
-        name: reportInfo.name || `报告_${now.slice(0, 10)}`,
+        name: reportName,
+        reportNo,
         description: reportInfo.description || '',
         scriptId,
         scriptName: script.name,
@@ -1112,7 +1218,7 @@ export class ReportService {
 
       // 保存到数据库（后台模式由 runBackground 的 finalize 负责写入）
       if (!preWorkspaceDir) {
-        await reportRepository.create(report);
+        await this.createReportWithRetry(report);
       }
 
       log.info(`报告生成完成: ${report.name} (${reportId})`);
@@ -1207,6 +1313,7 @@ export class ReportService {
     const report: Report = {
       id: reportId,
       name: reportFileName,
+      reportNo: await this.generateReportNo(),
       description: `${category} 类巡检日志 AI 智能分析报告`,
       scriptId: 'ai-generated',
       scriptName: 'AI智能分析',
@@ -1227,7 +1334,7 @@ export class ReportService {
       reportSource: 'ai',
     };
 
-    await reportRepository.create(report);
+    await this.createReportWithRetry(report);
     log.info(`AI分析报告已保存: ${reportFileName} (${reportId})`, traceId, { category, originalFileName });
     return report;
   }
@@ -1529,9 +1636,14 @@ export class ReportService {
       throw new Error('报告没有文件');
     }
 
-    // 创建tar.gz压缩包，文件名仅使用 reportId（防止路径遍历）
-    const archiveName = `${reportId}.tar.gz`;
-    const archivePath = path.join(this.reportsDir, archiveName);
+    // 下载文件名使用报告名（清理文件系统不安全字符）；
+    // 磁盘上的临时压缩包仍使用 reportId 命名，避免同名报告的临时文件冲突
+    const safeReportName = (report.name || '')
+      .replace(/[\/\\:*?"<>|\x00-\x1f]/g, '_')
+      .trim()
+      .replace(/^\.+/, '') || reportId;
+    const archiveName = `${safeReportName}.tar.gz`;
+    const archivePath = path.join(this.reportsDir, `${reportId}.tar.gz`);
 
     await this.createTarGz(report.workspaceDir, files, archivePath);
 

@@ -38,6 +38,7 @@ function rowToScript(row: any): Script {
     }),
     pythonVersion: row.python_version || 'embedded',
     isMultiFile: Boolean(row.is_multi_file),
+    reportNameTemplate: row.report_name_template || '',
     uploadedAt: row.uploaded_at,
     uploadedBy: row.uploaded_by || 'unknown',
   };
@@ -64,6 +65,7 @@ function scriptToRow(script: Script): any[] {
     JSON.stringify(script.depsStatus || { status: 'none', log: '', packages: [] }),
     script.pythonVersion || 'embedded',
     script.isMultiFile ? 1 : 0,
+    script.reportNameTemplate || null,
     script.uploadedAt,
     script.uploadedBy || 'unknown',
   ];
@@ -112,8 +114,9 @@ export const scriptRepository = {
       `INSERT INTO scripts (
         id, name, description, script_type, region, input_formats, input_format_manual,
         version, category, file_name, file_path, file_hash, file_size, template_required,
-        template_ids, requirements, deps_status, python_version, is_multi_file, uploaded_at, uploaded_by
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        template_ids, requirements, deps_status, python_version, is_multi_file, report_name_template,
+        uploaded_at, uploaded_by
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       scriptToRow(script)
     );
 
@@ -141,6 +144,7 @@ export const scriptRepository = {
       depsStatus: 'deps_status',
       pythonVersion: 'python_version',
       isMultiFile: 'is_multi_file',
+      reportNameTemplate: 'report_name_template',
     };
 
     const fields: string[] = [];

@@ -96,7 +96,7 @@ export function ScriptFormDialog({ open, onOpenChange, editTarget, onEditTargetC
     setPrevOpen(open);
     if (open) {
       if (editTarget) {
-        setMeta({ name: editTarget.name, description: editTarget.description, scriptType: editTarget.scriptType, region: editTarget.region || '全部', inputFormats: editTarget.inputFormats || '', inputFormatManual: editTarget.inputFormatManual || false, version: editTarget.version, category: editTarget.category, templateRequired: editTarget.templateRequired, templateIds: [...editTarget.templateIds], auxiliaryFiles: dedupeAux([...editTarget.auxiliaryFiles]), extraFiles: dedupeAux([...(editTarget.extraFiles || [])]), requirements: editTarget.requirements || [], pythonVersion: editTarget.pythonVersion || 'embedded', isMultiFile: editTarget.isMultiFile || false });
+        setMeta({ name: editTarget.name, description: editTarget.description, reportNameTemplate: editTarget.reportNameTemplate || '', scriptType: editTarget.scriptType, region: editTarget.region || '全部', inputFormats: editTarget.inputFormats || '', inputFormatManual: editTarget.inputFormatManual || false, version: editTarget.version, category: editTarget.category, templateRequired: editTarget.templateRequired, templateIds: [...editTarget.templateIds], auxiliaryFiles: dedupeAux([...editTarget.auxiliaryFiles]), extraFiles: dedupeAux([...(editTarget.extraFiles || [])]), requirements: editTarget.requirements || [], pythonVersion: editTarget.pythonVersion || 'embedded', isMultiFile: editTarget.isMultiFile || false });
         setRequirementsText((editTarget.requirements || []).join('\n'));
         setSingleUploadFiles([]);
         setMultiUploadFiles([]);
@@ -207,6 +207,7 @@ export function ScriptFormDialog({ open, onOpenChange, editTarget, onEditTargetC
       const formData = new FormData();
       formData.append('name', meta.name.trim());
       formData.append('description', meta.description);
+      formData.append('reportNameTemplate', meta.reportNameTemplate);
       formData.append('scriptType', meta.scriptType);
       formData.append('region', meta.region);
       formData.append('inputFormats', meta.inputFormats);
@@ -268,6 +269,7 @@ export function ScriptFormDialog({ open, onOpenChange, editTarget, onEditTargetC
         const formData = new FormData();
         formData.append('name', meta.name.trim());
         formData.append('description', meta.description);
+        formData.append('reportNameTemplate', meta.reportNameTemplate);
         formData.append('scriptType', meta.scriptType);
         formData.append('version', meta.version);
         formData.append('category', meta.category);
@@ -397,6 +399,30 @@ export function ScriptFormDialog({ open, onOpenChange, editTarget, onEditTargetC
               <div className="space-y-2"><Label>版本号</Label><Input value={meta.version} onChange={(e) => setMeta({ ...meta, version: e.target.value })} placeholder="如 v1.0.0" /></div>
             </div>
             <div className="space-y-2"><Label>备注（{meta.description.length}/100）</Label><Textarea value={meta.description} onChange={(e) => setMeta({ ...meta, description: e.target.value })} placeholder={editTarget ? undefined : '选填，最多100字'} rows={2} maxLength={100} /></div>
+            <div className="space-y-2">
+              <Label>报告命名规则</Label>
+              <Input value={meta.reportNameTemplate} onChange={(e) => setMeta({ ...meta, reportNameTemplate: e.target.value })} placeholder="留空使用默认命名" />
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                可用通配符：<code className="font-mono">{'{date}'}</code>=YYYYMMDD，<code className="font-mono">{'{date_dash}'}</code>=YYYY-MM-DD，<code className="font-mono">{'{time}'}</code>=HHMM，<code className="font-mono">{'{datetime}'}</code>=YYYYMMDD-HHMM，<code className="font-mono">{'{user_name}'}</code>=用户名，<code className="font-mono">{'{script_name}'}</code>=脚本名称
+              </p>
+              {meta.reportNameTemplate.trim() && (
+                <p className="text-xs text-muted-foreground">
+                  预览：<span className="font-mono">{(() => {
+                    const now = new Date();
+                    const p = (n: number) => String(n).padStart(2, '0');
+                    const d = `${now.getFullYear()}${p(now.getMonth() + 1)}${p(now.getDate())}`;
+                    const t = `${p(now.getHours())}${p(now.getMinutes())}`;
+                    return meta.reportNameTemplate
+                      .replace(/\{date_dash\}/g, `${now.getFullYear()}-${p(now.getMonth() + 1)}-${p(now.getDate())}`)
+                      .replace(/\{datetime\}/g, `${d}-${t}`)
+                      .replace(/\{date\}/g, d)
+                      .replace(/\{time\}/g, t)
+                      .replace(/\{user_name\}/g, user?.displayName || user?.username || '用户名')
+                      .replace(/\{script_name\}/g, meta.name || '脚本名称');
+                  })()}</span>
+                </p>
+              )}
+            </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2"><Label>适用区域</Label>
                 <Select value={meta.region} onValueChange={(v) => setMeta({ ...meta, region: v as ScriptRegion })}>
