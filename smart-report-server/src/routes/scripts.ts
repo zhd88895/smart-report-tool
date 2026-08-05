@@ -592,8 +592,10 @@ export class ScriptRoutes {
         return;
       }
 
-      const fileName = encodeURIComponent(script.fileName);
-      res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${fileName}`);
+      // 同时提供 ASCII fallback 和 RFC 5987 UTF-8 编码，与其他下载路由保持一致
+      const encodedName = encodeURIComponent(script.fileName).replace(/'/g, "%27");
+      const asciiName = script.fileName.replace(/[^\x20-\x7E]/g, '?').replace(/"/g, '');
+      res.setHeader('Content-Disposition', `attachment; filename="${asciiName || 'script'}"; filename*=UTF-8''${encodedName}`);
       res.setHeader('Content-Type', 'application/octet-stream');
 
       const fileStream = createReadStream(script.filePath);

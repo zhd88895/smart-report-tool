@@ -7,6 +7,7 @@ import { EmptyState } from '@/components/common/EmptyState';
 import { LoadingSpinner } from '@/components/common/LoadingSpinner';
 import { Report } from '@/types';
 import { getApiUrl, fetchWithAuth } from '@/services/api';
+import { parseContentDispositionFilename } from '@/utils/download';
 
 export interface ReportFileInfo { index: number; name: string; size: number; }
 
@@ -37,8 +38,11 @@ function downloadFile(reportId: string, fileIndex: number, fileName: string) {
     const a = document.createElement('a');
     a.href = objUrl;
     a.download = fileName;
+    document.body.appendChild(a);  // Firefox 下必须挂载到文档才能触发下载
     a.click();
-    URL.revokeObjectURL(objUrl);
+    document.body.removeChild(a);
+    // 延迟回收 blob URL，避免浏览器尚未开始异步下载就被释放
+    setTimeout(() => URL.revokeObjectURL(objUrl), 2000);
   }).catch(() => {
     toast.error('下载失败，请确认后端服务已启动');
   });
@@ -131,8 +135,8 @@ export function ReportPreviewDialog({
                   const a = document.createElement('a');
                   a.href = objUrl;
                   const cd = res.headers.get('Content-Disposition');
-                  const match = cd?.match(/filename="?([^"]+)"?/);
-                  a.download = match ? decodeURIComponent(match[1]) : `${currentReport.name}_全部文件.tar.gz`;
+                  const parsedName = parseContentDispositionFilename(cd);
+                  a.download = parsedName || `${currentReport.name}_全部文件.tar.gz`;
                   document.body.appendChild(a);
                   a.click();
                   document.body.removeChild(a);

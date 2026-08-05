@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { toast } from 'sonner';
 import { Download, Package, RefreshCw, Terminal } from 'lucide-react';
 import { getApiUrl, fetchWithAuth } from '@/services/api';
+import { parseContentDispositionFilename } from '@/utils/download';
 
 type ResultStatus = 'generating' | 'success' | 'failed';
 
@@ -59,8 +60,8 @@ export function GeneratingResultCard({
       const a = document.createElement('a');
       a.href = objUrl;
       const cd = res.headers.get('Content-Disposition');
-      const match = cd?.match(/filename="?([^"]+)"?/);
-      a.download = match ? decodeURIComponent(match[1]) : (filePaths[fileIndex]?.split(/[/\\]/).pop() || `report`);
+      const parsedName = parseContentDispositionFilename(cd);
+      a.download = parsedName || (filePaths[fileIndex]?.split(/[/\\]/).pop() || `report`);
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -96,8 +97,8 @@ export function GeneratingResultCard({
       const a = document.createElement('a');
       a.href = objUrl;
       const cd = res.headers.get('Content-Disposition');
-      const match = cd?.match(/filename="?([^"]+)"?/);
-      a.download = match ? decodeURIComponent(match[1]) : `${report?.name || '报告'}_全部文件.tar.gz`;
+      const parsedName = parseContentDispositionFilename(cd);
+      a.download = parsedName || `${report?.name || '报告'}_全部文件.tar.gz`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);

@@ -310,12 +310,12 @@ export class TemplateRoutes {
         return;
       }
 
-      // 设置下载响应头
+      // 设置下载响应头：同时提供 ASCII fallback 和 RFC 5987 UTF-8 编码，防止中文乱码
+      const encodedName = encodeURIComponent(template.fileName).replace(/'/g, "%27");
+      const asciiName = template.fileName.replace(/[^\x20-\x7E]/g, '?').replace(/"/g, '');
       res.writeHead(200, {
         'Content-Type': 'application/octet-stream',
-        'Content-Disposition': `attachment; filename="${encodeURIComponent(
-          template.fileName
-        )}"`,
+        'Content-Disposition': `attachment; filename="${asciiName || 'template'}"; filename*=UTF-8''${encodedName}`,
       });
 
       // 创建文件读取流并发送

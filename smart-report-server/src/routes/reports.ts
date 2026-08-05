@@ -422,8 +422,16 @@ export class ReportRoutes {
         'Content-Disposition': `attachment; filename="${asciiFallback || 'report'}"; filename*=UTF-8''${encodedName}`,
       });
 
-      // 创建文件读取流并发送
+      // 创建文件读取流并发送（stat 之后文件可能被清理，必须处理流错误避免响应挂起）
       const fileStream = createReadStream(fileInfo.filePath);
+      fileStream.on('error', (err) => {
+        log.error(`文件流读取失败: ${err.message}`);
+        if (!res.headersSent) {
+          res.status(404).json({ code: 404, data: null, message: '文件读取失败' });
+        } else {
+          res.end();
+        }
+      });
       fileStream.pipe(res);
     } catch (error: any) {
       if (!res.headersSent) {
