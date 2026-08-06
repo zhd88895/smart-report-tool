@@ -254,7 +254,7 @@ export default function ReportsPage() {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       <h2 className="text-2xl font-bold tracking-tight flex items-center gap-2">
         {activeTab === 'ai' ? <Sparkles className="h-6 w-6" /> : <FileText className="h-6 w-6" />}
         {activeTab === 'ai' ? 'AI报告' : '脚本报告'}

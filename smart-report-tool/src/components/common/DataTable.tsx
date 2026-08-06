@@ -56,6 +56,8 @@ interface DataTableProps<T> {
    * 不传则行为与增强前完全一致。
    */
   tableId?: string;
+  /** 附加到 <table> 的 className（如调整字号 text-[15px]） */
+  tableClassName?: string;
   /**
    * 「列设置」按钮的外部容器元素 id。
    * 传入后工具栏不再渲染在表格上方，而是通过 Portal 渲染到该容器内
@@ -110,7 +112,7 @@ function loadPersisted(tableId: string): PersistedTableState {
   }
 }
 
-export function DataTable<T>({ columns, data, rowKey, keyExtractor, pageSize = 10, sortKey, sortDir, onSortChange, tableId, toolbarContainerId }: DataTableProps<T>) {
+export function DataTable<T>({ columns, data, rowKey, keyExtractor, pageSize = 10, sortKey, sortDir, onSortChange, tableId, tableClassName, toolbarContainerId }: DataTableProps<T>) {
   // 「列设置」工具栏的外部渲染容器（如卡片标题行），首渲染时容器可能尚未挂载，需 effect 后再取值
   const [toolbarEl, setToolbarEl] = useState<HTMLElement | null>(null);
   useEffect(() => {
@@ -326,7 +328,7 @@ export function DataTable<T>({ columns, data, rowKey, keyExtractor, pageSize = 1
         toolbarEl
       )}
       <div className="rounded-md border overflow-x-auto" ref={containerRef}>
-        <Table style={tableId ? { tableLayout: 'fixed', width: totalWidth, minWidth: '100%' } : undefined}>
+        <Table className={tableClassName} style={tableId ? { tableLayout: 'fixed', width: totalWidth, minWidth: '100%' } : undefined}>
           <TableHeader>
             <TableRow>
               {visibleColumns.map((col) => (
