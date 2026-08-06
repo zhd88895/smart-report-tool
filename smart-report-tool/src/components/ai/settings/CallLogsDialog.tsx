@@ -12,7 +12,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { EmptyState } from '@/components/common/EmptyState';
 import { LoadingSpinner } from '@/components/common/LoadingSpinner';
 import { toast } from 'sonner';
@@ -247,7 +246,7 @@ export function CallLogsDialog({ open, onOpenChange, modelNameMap }: CallLogsDia
                 <EmptyState title="暂无调用记录" description="使用 AI 功能后会在此展示每次调用的详情" />
               ) : (
                 <>
-                  <ScrollArea className="flex-1 min-h-0 border rounded-md">
+                  <div className="flex-1 min-h-0 overflow-auto border rounded-md">
                     <Table>
                       <TableHeader>
                         <TableRow>
@@ -291,7 +290,7 @@ export function CallLogsDialog({ open, onOpenChange, modelNameMap }: CallLogsDia
                         ))}
                       </TableBody>
                     </Table>
-                  </ScrollArea>
+                  </div>
                   {logs.length < total && (
                     <div className="flex justify-center mt-2">
                       <Button
@@ -337,7 +336,7 @@ export function CallLogsDialog({ open, onOpenChange, modelNameMap }: CallLogsDia
               ) : reportLogs.length === 0 ? (
                 <EmptyState title="暂无报告消耗记录" description="使用 AI 智能分析或报告分析功能后会在此展示" />
               ) : (
-                <ScrollArea className="flex-1 min-h-0 border rounded-md">
+                <div className="flex-1 min-h-0 overflow-auto border rounded-md">
                   <Table>
                     <TableHeader>
                       <TableRow>
@@ -385,7 +384,7 @@ export function CallLogsDialog({ open, onOpenChange, modelNameMap }: CallLogsDia
                       ))}
                     </TableBody>
                   </Table>
-                </ScrollArea>
+                </div>
               )}
             </TabsContent>
           </Tabs>
@@ -438,11 +437,11 @@ export function CallLogsDialog({ open, onOpenChange, modelNameMap }: CallLogsDia
                 </div>
               )}
               {/* 完整请求体 */}
-              <ScrollArea className="flex-1 min-h-0 border rounded-md">
+              <div className="flex-1 min-h-0 overflow-auto border rounded-md">
                 <pre className="p-3 text-xs leading-relaxed whitespace-pre-wrap break-all font-mono">
                   {detailBodyPretty || '（无请求体快照，该记录可能产生于旧版本）'}
                 </pre>
-              </ScrollArea>
+              </div>
             </div>
           )}
         </DialogContent>
