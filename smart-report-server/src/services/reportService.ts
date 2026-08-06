@@ -27,6 +27,7 @@ import {
   TEMPLATES_DIR,
   UPLOADS_DIR,
   VENV_PYTHON,
+  getPipIndexUrl,
 } from '../config';
 import zlib from 'zlib';
 import { Readable } from 'stream';
@@ -2247,9 +2248,10 @@ export class ReportService {
         onLog?.(
           `[环境安装] 开始安装 ${missing.length} 个缺失的包...`
         );
+        const pipIndexUrl = getPipIndexUrl();
         const installArgs = pipPath?.endsWith('.exe')
-          ? ['install', '--progress-bar', 'off', '--index-url', config.PIP_INDEX_URL, ...missing]
-          : [...pythonArgs, '-m', 'pip', 'install', '--progress-bar', 'off', '--index-url', config.PIP_INDEX_URL, ...missing];
+          ? ['install', '--progress-bar', 'off', '--index-url', pipIndexUrl, ...missing]
+          : [...pythonArgs, '-m', 'pip', 'install', '--progress-bar', 'off', '--index-url', pipIndexUrl, ...missing];
         const pipInstallExe = pipPath?.endsWith('.exe') ? pipPath : pythonExe;
         const installResult = await new Promise<{ code: number; out: string }>(
           (resolve, reject) => {

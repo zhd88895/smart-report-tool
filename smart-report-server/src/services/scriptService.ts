@@ -15,7 +15,7 @@ import fs from 'fs/promises';
 import { existsSync, mkdirSync } from 'fs';
 import path from 'path';
 import { spawn, execSync } from 'child_process';
-import { config, SCRIPTS_DIR, VENV_PYTHON, EMBEDDED_PYTHON } from '../config';
+import { config, SCRIPTS_DIR, VENV_PYTHON, EMBEDDED_PYTHON, getPipIndexUrl } from '../config';
 
 // 模块级日志实例（核心业务模块）
 const log = getLogger('ScriptService', 'core');
@@ -1204,9 +1204,10 @@ export class ScriptService {
       const pipPath = path.join(venvDir, 'Scripts', 'pip.exe');
       const pipCmd = existsSync(pipPath) ? pipPath : venvPythonExe;
       const pipExe = pipCmd.endsWith('.exe') && pipCmd !== venvPythonExe ? pipCmd : venvPythonExe;
+      const pipIndexUrl = getPipIndexUrl();
       const installArgs = pipCmd.endsWith('.exe') && pipCmd !== venvPythonExe
-        ? ['install', '--progress-bar', 'off', '--index-url', config.PIP_INDEX_URL, ...requirements]
-        : [...venvPythonArgs, '-m', 'pip', 'install', '--progress-bar', 'off', '--index-url', config.PIP_INDEX_URL, ...requirements];
+        ? ['install', '--progress-bar', 'off', '--index-url', pipIndexUrl, ...requirements]
+        : [...venvPythonArgs, '-m', 'pip', 'install', '--progress-bar', 'off', '--index-url', pipIndexUrl, ...requirements];
 
       // 简化日志处理：去掉 ANSI 序列后按行输出，每行都实时推送给前端
       const handlePipData = (d: Buffer) => {

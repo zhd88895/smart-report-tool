@@ -246,6 +246,35 @@ export async function apiDeletePythonVersion(version: string): Promise<{ success
 }
 
 /**
+ * 单个 Python 环境的探测结果
+ */
+export interface PythonEnvProbe {
+  available: boolean;
+  version: string | null;
+  path: string | null;
+}
+
+/**
+ * 脚本运行环境信息
+ */
+export interface PythonEnvironmentInfo {
+  embedded: PythonEnvProbe;
+  venv: PythonEnvProbe;
+  system: PythonEnvProbe;
+  pipIndexUrl: string;
+}
+
+/**
+ * 获取脚本运行环境信息（内嵌 Python / 全局 venv / 系统 Python / pip 镜像源）
+ */
+export async function apiGetPythonEnvironment(): Promise<PythonEnvironmentInfo> {
+  const res = await fetchWithAuth(`${API_BASE}/python-versions/environment`);
+  if (!res.ok) throw new Error(`获取 Python 环境信息失败: ${res.status}`);
+  const data = await res.json();
+  return data?.data;
+}
+
+/**
  * 上传前 hash 预检查（秒传判定）：返回已存在于服务端去重存储的 hash → 文件信息
  */
 export async function checkFileHashes(hashes: string[]): Promise<Record<string, { fileName: string; size: number }>> {

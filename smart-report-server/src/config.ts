@@ -178,6 +178,28 @@ function generateInstanceId(): string {
 // 导出默认配置实例
 export const config = getConfig();
 
+/**
+ * 获取当前生效的 pip 镜像源地址
+ *
+ * 优先读取系统设置 python.pipIndexUrl（settingsService 缓存），
+ * 缓存未初始化或未设置时回落到环境变量配置 config.PIP_INDEX_URL。
+ * 注意：settingsService 在 config 之后初始化，必须在使用时动态读取，
+ * 因此这里延迟 require 以避免模块级循环依赖。
+ *
+ * @returns 当前生效的 PyPI 镜像源 URL
+ */
+export function getPipIndexUrl(): string {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { settingsService } = require('./services/settingsService');
+    const fromSettings: string | undefined = settingsService.get('python.pipIndexUrl');
+    if (fromSettings) return fromSettings;
+  } catch {
+    // 设置缓存尚未初始化（如启动早期），回落到环境变量配置
+  }
+  return getConfig().PIP_INDEX_URL;
+}
+
 // 导出常用子目录常量（基于 DATA_DIR 的相对路径）
 export const DATA_DIR = config.DATA_DIR;
 export const SCRIPTS_DIR = path.join(DATA_DIR, 'scripts');

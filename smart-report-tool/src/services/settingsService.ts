@@ -65,4 +65,5 @@ export const CATEGORY_LABELS: Record<string, string> = {
   security: '安全',
   logs: '日志',
   notification: '通知',
+  python: 'Python',
 };

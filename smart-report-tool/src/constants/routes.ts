@@ -3,6 +3,7 @@ export const ROUTES = {
   REGISTER: '/register',
   DASHBOARD: '/dashboard',
   SCRIPTS: '/scripts',
+  PYTHON_ENV: '/scripts/python-env',
   REPORT_CREATE: '/report/create',
   REPORTS: '/reports',
   ASSISTANT: '/assistant',
@@ -17,6 +18,7 @@ export const ROUTES = {
 export const ROUTE_LABELS: Record<string, string> = {
   [ROUTES.DASHBOARD]: '仪表盘',
   [ROUTES.SCRIPTS]: '脚本及模板',
+  [ROUTES.PYTHON_ENV]: '脚本运行环境',
   [ROUTES.REPORT_CREATE]: 'AI智能分析',
   [ROUTES.REPORTS]: '报告管理',
   [ROUTES.ASSISTANT]: 'AI助手',

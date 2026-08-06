@@ -2,7 +2,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard, FileText, ClipboardList, Download, Bot,
   Users, Settings, SlidersHorizontal, ChevronLeft, ChevronRight,
-  Database, Sparkles, FileSearch, FileBarChart,
+  Database, Sparkles, FileSearch, FileBarChart, Terminal,
 } from 'lucide-react';
 import { useAuthStore } from '@/stores/authStore';
 import { useUIStore } from '@/stores/uiStore';
@@ -49,6 +49,7 @@ const menuGroups: MenuGroup[] = [
     title: '脚本与数据',
     items: [
       { icon: FileText, path: ROUTES.SCRIPTS, feature: 'scripts' },
+      { icon: Terminal, path: ROUTES.PYTHON_ENV, feature: 'scripts' },
       // 与 AI智能分析共用 /report/create 页面，?mode=script 进入脚本模式
       { icon: ClipboardList, path: ROUTES.REPORT_CREATE, search: '?mode=script', label: '脚本生成报告', feature: 'reportCreate' },
       { icon: Download, path: ROUTES.REPORTS, label: '脚本报告', feature: 'reports' },

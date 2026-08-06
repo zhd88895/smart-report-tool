@@ -7,6 +7,7 @@ import LoginPage from '@/pages/LoginPage';
 import RegisterPage from '@/pages/RegisterPage';
 import DashboardPage from '@/pages/DashboardPage';
 import ScriptsTemplatesPage from '@/pages/ScriptsTemplatesPage';
+import PythonEnvPage from '@/pages/PythonEnvPage';
 import ReportCreatePage from '@/pages/ReportCreatePage';
 import ReportsPage from '@/pages/ReportsPage';
 import AssistantPage from '@/pages/AssistantPage';
@@ -24,6 +25,7 @@ export function AppRouter() {
       <Route element={<AppLayout />}>
         <Route path={ROUTES.DASHBOARD} element={<RouteGuard requiredFeature="dashboard"><DashboardPage /></RouteGuard>} />
         <Route path={ROUTES.SCRIPTS} element={<RouteGuard requiredFeature="scripts"><ScriptsTemplatesPage /></RouteGuard>} />
+        <Route path={ROUTES.PYTHON_ENV} element={<RouteGuard requiredFeature="scripts"><PythonEnvPage /></RouteGuard>} />
         <Route path={ROUTES.REPORT_CREATE} element={<RouteGuard requiredFeature="reportCreate"><ReportCreatePage /></RouteGuard>} />
         <Route path={ROUTES.REPORTS} element={<RouteGuard requiredFeature="reports"><ReportsPage /></RouteGuard>} />
         <Route path={ROUTES.ASSISTANT} element={<RouteGuard requiredFeature="assistant"><AssistantPage /></RouteGuard>} />

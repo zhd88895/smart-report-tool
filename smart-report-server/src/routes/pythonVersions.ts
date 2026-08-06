@@ -7,9 +7,38 @@
  */
 
 import { Router, Request, Response } from 'express';
+import fsSync from 'fs';
+import { execSync } from 'child_process';
 import { pythonVersionService } from '../services/pythonVersionService';
 import { authenticate, authorize, UserRole } from '../middleware/auth';
 import { ApiResponse, safeErrorMessage } from '../types';
+import { VENV_PYTHON, EMBEDDED_PYTHON, getPipIndexUrl } from '../config';
+
+/**
+ * 单个 Python 环境的探测结果
+ */
+interface PythonEnvProbe {
+  /** 该环境是否可用 */
+  available: boolean;
+  /** Python 版本号（不可用时为 null） */
+  version: string | null;
+  /** python 可执行文件路径（系统 Python 未找到时为 null） */
+  path: string | null;
+}
+
+/**
+ * 脚本运行环境信息
+ */
+export interface PythonEnvironmentInfo {
+  /** 内嵌 Python（data/python-embedded） */
+  embedded: PythonEnvProbe;
+  /** 全局虚拟环境（data/venv） */
+  venv: PythonEnvProbe;
+  /** 系统 PATH 中的 Python */
+  system: PythonEnvProbe;
+  /** 当前生效的 pip 镜像源地址 */
+  pipIndexUrl: string;
+}
 
 /**
  * Python 版本管理路由类
@@ -31,6 +60,9 @@ export class PythonVersionRoutes {
 
     // 获取已安装的 Python 版本列表
     this.router.get('/installed', authenticate, this.getInstalledVersions.bind(this));
+
+    // 获取脚本运行环境信息（内嵌 Python / 全局 venv / 系统 Python / pip 镜像源）
+    this.router.get('/environment', authenticate, this.getEnvironmentInfo.bind(this));
 
     // 下载并安装指定版本的 Python
     this.router.post('/:version/download', authenticate, authorize(['admin']), this.downloadVersion.bind(this));
@@ -87,6 +119,88 @@ export class PythonVersionRoutes {
         code: 500,
         data: null,
         message: '获取已安装版本列表失败',
+        error: safeErrorMessage(error),
+      };
+
+      res.status(500).json(response);
+    }
+  }
+
+  /**
+   * 获取脚本运行环境信息
+   *
+   * 通过运行各 Python 的 --version 命令探测：
+   * - 内嵌 Python（data/python-embedded/python.exe）
+   * - 全局虚拟环境（data/venv/Scripts/python.exe）
+   * - 系统 PATH 中的 Python
+   * 同时返回当前生效的 pip 镜像源地址。
+   */
+  private async getEnvironmentInfo(req: Request, res: Response): Promise<void> {
+    /** 探测指定路径的 Python 可执行文件 */
+    const probePython = (pythonPath: string): PythonEnvProbe => {
+      if (!fsSync.existsSync(pythonPath)) {
+        return { available: false, version: null, path: pythonPath };
+      }
+      try {
+        // 旧版本 Python 的 --version 输出到 stderr，2>&1 统一捕获
+        const out = execSync(`"${pythonPath}" --version 2>&1`, {
+          timeout: 10000,
+          encoding: 'utf-8',
+        }).trim();
+        const match = out.match(/Python\s+([\d.]+)/i);
+        return { available: true, version: match ? match[1] : out, path: pythonPath };
+      } catch {
+        return { available: false, version: null, path: pythonPath };
+      }
+    };
+
+    /** 探测系统 PATH 中的 Python */
+    const probeSystemPython = (): PythonEnvProbe => {
+      try {
+        const out = execSync('python --version 2>&1', {
+          timeout: 10000,
+          encoding: 'utf-8',
+        }).trim();
+        const match = out.match(/Python\s+([\d.]+)/i);
+        const version = match ? match[1] : out;
+
+        // 尝试解析系统 Python 的实际路径（Windows where / POSIX which）
+        let pythonPath: string | null = null;
+        try {
+          const whereCmd = process.platform === 'win32' ? 'where python' : 'which python';
+          pythonPath = execSync(whereCmd, { timeout: 10000, encoding: 'utf-8' })
+            .split(/\r?\n/)[0]
+            .trim() || null;
+        } catch {
+          // 路径解析失败不影响版本信息
+        }
+
+        return { available: true, version, path: pythonPath };
+      } catch {
+        return { available: false, version: null, path: null };
+      }
+    };
+
+    try {
+      const info: PythonEnvironmentInfo = {
+        embedded: probePython(EMBEDDED_PYTHON),
+        venv: probePython(VENV_PYTHON),
+        system: probeSystemPython(),
+        pipIndexUrl: getPipIndexUrl(),
+      };
+
+      const response: ApiResponse<PythonEnvironmentInfo> = {
+        code: 200,
+        data: info,
+        message: '获取环境信息成功',
+      };
+
+      res.status(200).json(response);
+    } catch (error: unknown) {
+      const response: ApiResponse<null> = {
+        code: 500,
+        data: null,
+        message: '获取环境信息失败',
         error: safeErrorMessage(error),
       };
 

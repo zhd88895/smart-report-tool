@@ -11,7 +11,7 @@ import fs from 'fs/promises';
 import fsSync from 'fs';
 import path from 'path';
 import { spawn, execSync } from 'child_process';
-import { getConfig } from '../config';
+import { getConfig, getPipIndexUrl } from '../config';
 import { logger, getLogger, generateTraceId } from '../utils/logger';
 import { safeErrorMessage } from '../types';
 import https from 'https';
@@ -827,7 +827,7 @@ export class PythonVersionService {
     // 使用较长的超时和重试，避免网络波动导致 pip 安装失败
     // 默认使用国内 PyPI 镜像（清华），避免 pypi.org 在部分网络环境下 SSL 握手失败
     log.info('运行 get-pip.py...');
-    const pipIndexUrl = getConfig().PIP_INDEX_URL;
+    const pipIndexUrl = getPipIndexUrl();
     const pipEnv = {
       ...process.env,
       PYTHONIOENCODING: 'utf-8',
@@ -895,7 +895,7 @@ export class PythonVersionService {
     }
 
     // 如果 pip 不存在，使用 python -m pip
-    const pipIndexUrl = getConfig().PIP_INDEX_URL;
+    const pipIndexUrl = getPipIndexUrl();
     const pipCmd = fsSync.existsSync(pipExe) ? pipExe : pythonExe;
     const pipArgs = fsSync.existsSync(pipExe)
       ? ['install', virtualenvSpec, '--index-url', pipIndexUrl, '--timeout', '120', '--retries', '5']

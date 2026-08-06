@@ -427,6 +427,9 @@ async function createSchema(): Promise<void> {
   // 迁移：为已存在的库补充运行时动态配置（记住我天数、登录注册限流等，INSERT OR IGNORE 幂等）
   await migrateRuntimeSettings();
 
+  // 迁移：为已存在的库补充 Python 环境配置（pip 镜像源，INSERT OR IGNORE 幂等）
+  await migratePythonSettings();
+
   // 迁移：上传文件 hash 去重索引表（内容寻址存储 data/uploads/dedup/）
   await runAsync(`CREATE TABLE IF NOT EXISTS file_hashes (
     hash TEXT PRIMARY KEY,
@@ -763,6 +766,7 @@ async function seedDefaultSettings(): Promise<void> {
       { key: 'notification.smtpHost', value: '', category: 'notification', label: 'SMTP 服务器', value_type: 'string', sort_order: 1 },
       { key: 'notification.smtpPort', value: '587', category: 'notification', label: 'SMTP 端口', value_type: 'number', sort_order: 2 },
       { key: 'notification.emailFrom', value: '', category: 'notification', label: '发件人地址', value_type: 'string', sort_order: 3 },
+      { key: 'python.pipIndexUrl', value: 'https://pypi.tuna.tsinghua.edu.cn/simple', category: 'python', label: 'pip 镜像源地址', description: 'pip install 使用的 PyPI 镜像源，调整后即时生效', value_type: 'string', sort_order: 1 },
     ];
 
     for (const s of defaults) {
@@ -772,7 +776,7 @@ async function seedDefaultSettings(): Promise<void> {
         [s.key, s.value, s.category, s.label, s.description || '', s.value_type, s.options || null, s.is_secret || 0, s.sort_order, now]
       );
     }
-    logger.info('数据库迁移: settings 表已填充默认配置（15 项）');
+    logger.info('数据库迁移: settings 表已填充默认配置（16 项）');
   } catch (e: any) {
     logger.warn(`settings 种子数据填充跳过: ${e.message}`);
   }
@@ -899,6 +903,29 @@ async function migrateRuntimeSettings(): Promise<void> {
     }
   } catch (e: any) {
     logger.warn(`运行时动态配置补插跳过: ${e.message}`);
+  }
+}
+
+/**
+ * 迁移：为已存在的库补充 Python 环境配置
+ * （python.pipIndexUrl pip 镜像源地址，由 config.getPipIndexUrl() 动态读取，调整即时生效；
+ *  seedDefaultSettings 仅在空库执行，老库需要在这里补插，INSERT OR IGNORE 幂等）
+ */
+async function migratePythonSettings(): Promise<void> {
+  const now = new Date().toISOString();
+  const items = [
+    { key: 'python.pipIndexUrl', value: 'https://pypi.tuna.tsinghua.edu.cn/simple', category: 'python', label: 'pip 镜像源地址', description: 'pip install 使用的 PyPI 镜像源，调整后即时生效', value_type: 'string', sort_order: 1 },
+  ];
+  try {
+    for (const s of items) {
+      await runAsync(
+        `INSERT OR IGNORE INTO settings (key, value, category, label, description, value_type, options, editable_by, is_secret, sort_order, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, NULL, 'admin', 0, ?, ?)`,
+        [s.key, s.value, s.category, s.label, s.description, s.value_type, s.sort_order, now]
+      );
+    }
+  } catch (e: any) {
+    logger.warn(`Python 环境配置补插跳过: ${e.message}`);
   }
 }
 export function runAsync(sql: string, params: any[] = []): Promise<sqlite3.RunResult> {
