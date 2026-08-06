@@ -19,10 +19,19 @@ import {
   clearAuthCookies,
 } from '../middleware/auth';
 import { sessionService } from '../services/sessionService';
+import { auditLogService } from '../services/auditLogService';
+import { getAsync } from '../db/database';
 import { ApiResponse, safeErrorMessage } from '../types';
 import { getLogger } from '../utils/logger';
 
 const log = getLogger('UserRoutes', 'other');
+
+/** 从请求中取客户端 IP（含代理头） */
+function clientIp(req: Request): string {
+  const fwd = req.headers['x-forwarded-for'];
+  if (typeof fwd === 'string' && fwd) return fwd.split(',')[0].trim();
+  return req.ip || req.socket.remoteAddress || '';
+}
 
 export class UserRoutes {
   private router: Router;
@@ -92,8 +101,10 @@ export class UserRoutes {
    * 登录（使用 HttpOnly Cookie 设置会话）
    */
   private async login(req: Request, res: Response): Promise<void> {
+    const ip = clientIp(req);
+    const username = String(req.body?.username || '');
     try {
-      const { username, password, rememberMe } = req.body;
+      const { password, rememberMe } = req.body;
 
       const result = await userService.login(username, password);
 
@@ -106,6 +117,14 @@ export class UserRoutes {
         rememberMe === true
       );
 
+      // 登录日志：成功
+      auditLogService.record({
+        category: 'auth', action: 'auth.login',
+        actorId: result.user.id, actorName: result.user.displayName || result.user.username,
+        target: result.user.username, detail: `登录成功（${rememberMe === true ? '记住登录' : '普通会话'}）`,
+        result: 'success', ip,
+      }).catch(() => {});
+
       // 不再返回 token，只返回用户信息
       const response: ApiResponse<{ user: typeof result.user }> = {
         code: 200,
@@ -116,6 +135,13 @@ export class UserRoutes {
       res.status(200).json(response);
     } catch (error: any) {
       log.warn(`登录失败: ${safeErrorMessage(error)}`);
+      // 登录日志：失败
+      auditLogService.record({
+        category: 'auth', action: 'auth.login',
+        actorName: username || null, target: username || null,
+        detail: `登录失败：${safeErrorMessage(error)}`,
+        result: 'failed', ip,
+      }).catch(() => {});
       res.status(401).json({ code: 401, data: null, message: '登录失败', error: safeErrorMessage(error) });
     }
   }
@@ -128,8 +154,15 @@ export class UserRoutes {
       const sessionId = req.cookies?.sid || req.cookies?.sid_r;
 
       if (sessionId) {
+        // 登出前解析会话属主，用于登录日志记录
+        const row = await getAsync('SELECT username FROM sessions WHERE id = ?', [sessionId]).catch(() => undefined);
         await sessionService.deleteSession(sessionId);
         log.info(`会话已销毁: ${sessionId.slice(0, 8)}...`);
+        auditLogService.record({
+          category: 'auth', action: 'auth.logout',
+          actorName: (row as any)?.username || null, target: (row as any)?.username || null,
+          detail: '退出登录', result: 'success', ip: clientIp(req),
+        }).catch(() => {});
       }
 
       clearAuthCookies(res);
@@ -196,11 +229,87 @@ export class UserRoutes {
   }
 
   /**
+   * 管理员敏感操作前置校验
+   *
+   * 规则：
+   * 1. 目标用户必须存在
+   * 2. 不能对自己的账户执行删除/角色变更（防止管理员把自己锁死）
+   * 3. 目标是其他管理员 → 拒绝（管理员不能编辑/删除其他管理员；
+   *    opts.allowAdminTarget=true 时放行，目前仅「重置密码」使用）
+   * 4. 操作对象是其他用户 → 必须在请求体携带 adminPassword，
+   *    并用当前管理员本人的密码通过验证
+   *
+   * 校验失败时直接写响应并记录安全审计日志，返回 null；通过则返回目标用户。
+   */
+  private async checkAdminAction(
+    req: Request,
+    res: Response,
+    targetId: string,
+    action: string,
+    actionLabel: string,
+    opts: { allowAdminTarget?: boolean; forbidSelf?: boolean } = {}
+  ): Promise<any | null> {
+    const actor = req.user!;
+    const ip = clientIp(req);
+    const audit = (result: 'success' | 'failed' | 'denied', detail: string, targetName?: string) =>
+      auditLogService.record({
+        category: 'security', action,
+        actorId: actor.userId, actorName: actor.username,
+        target: targetName || targetId, detail, result, ip,
+      }).catch(() => {});
+
+    const target = await userService.getUserById(targetId);
+    if (!target) {
+      res.status(404).json({ code: 404, data: null, message: '用户不存在' });
+      return null;
+    }
+    const targetName = target.displayName || target.username;
+
+    if (opts.forbidSelf && target.id === actor.userId) {
+      await audit('denied', `${actionLabel}被拒绝：不能对自己的账户执行此操作`, targetName);
+      res.status(400).json({ code: 400, data: null, message: `不能对自己的账户执行${actionLabel}操作` });
+      return null;
+    }
+
+    if (target.role === 'admin' && target.id !== actor.userId && !opts.allowAdminTarget) {
+      await audit('denied', `${actionLabel}被拒绝：目标是管理员账户`, targetName);
+      res.status(403).json({ code: 403, data: null, message: `不能${actionLabel}其他管理员账户` });
+      return null;
+    }
+
+    // 操作其他用户：验证当前管理员本人密码
+    if (target.id !== actor.userId) {
+      const adminPassword = req.body?.adminPassword;
+      if (!adminPassword) {
+        res.status(400).json({ code: 400, data: null, message: '需要输入当前管理员密码进行验证', error: 'ADMIN_PASSWORD_REQUIRED' });
+        return null;
+      }
+      const ok = await userService.verifyPassword(actor.userId, adminPassword);
+      if (!ok) {
+        await audit('failed', `${actionLabel}失败：管理员密码验证未通过`, targetName);
+        res.status(403).json({ code: 403, data: null, message: '管理员密码错误，操作已取消' });
+        return null;
+      }
+    }
+
+    return target;
+  }
+
+  /**
    * 删除用户
    */
   private async deleteUser(req: Request, res: Response): Promise<void> {
+    const target = await this.checkAdminAction(req, res, req.params.id as string, 'user.delete', '删除', { forbidSelf: true });
+    if (!target) return;
     try {
-      await userService.deleteUser(req.params.id as string);
+      await userService.deleteUser(target.id);
+      auditLogService.record({
+        category: 'security', action: 'user.delete',
+        actorId: req.user!.userId, actorName: req.user!.username,
+        target: target.displayName || target.username,
+        detail: `已删除用户 ${target.username}（角色：${target.role}）`,
+        result: 'success', ip: clientIp(req),
+      }).catch(() => {});
       res.status(200).json({ code: 200, data: { success: true }, message: '用户删除成功' });
     } catch (error: any) {
       res.status(400).json({ code: 400, data: null, message: '用户删除失败', error: safeErrorMessage(error) });
@@ -211,8 +320,31 @@ export class UserRoutes {
    * 更新用户状态
    */
   private async updateUserStatus(req: Request, res: Response): Promise<void> {
+    const newStatus = req.body.status;
+    // 状态变更不强制密码验证（审批流程高频操作），但管理员账户的状态不允许被其他管理员修改
+    const target = await userService.getUserById(req.params.id as string);
+    if (!target) {
+      res.status(404).json({ code: 404, data: null, message: '用户不存在' });
+      return;
+    }
+    const targetName = target.displayName || target.username;
+    if (target.role === 'admin' && target.id !== req.user!.userId) {
+      auditLogService.record({
+        category: 'security', action: 'user.status_change',
+        actorId: req.user!.userId, actorName: req.user!.username,
+        target: targetName, detail: `状态变更被拒绝：目标是管理员账户`, result: 'denied', ip: clientIp(req),
+      }).catch(() => {});
+      res.status(403).json({ code: 403, data: null, message: '不能修改其他管理员账户的状态' });
+      return;
+    }
     try {
-      const user = await userService.updateUserStatus(req.params.id as string, req.body.status);
+      const user = await userService.updateUserStatus(target.id, newStatus);
+      auditLogService.record({
+        category: 'security', action: 'user.status_change',
+        actorId: req.user!.userId, actorName: req.user!.username,
+        target: targetName, detail: `状态：${target.status} → ${newStatus}`,
+        result: 'success', ip: clientIp(req),
+      }).catch(() => {});
       res.status(200).json({ code: 200, data: user, message: '用户状态更新成功' });
     } catch (error: any) {
       res.status(400).json({ code: 400, data: null, message: '用户状态更新失败', error: safeErrorMessage(error) });
@@ -223,8 +355,18 @@ export class UserRoutes {
    * 更新用户角色
    */
   private async updateUserRole(req: Request, res: Response): Promise<void> {
+    const target = await this.checkAdminAction(req, res, req.params.id as string, 'user.role_change', '修改角色', { forbidSelf: true });
+    if (!target) return;
+    const newRole = req.body.role;
     try {
-      const user = await userService.updateUserRole(req.params.id as string, req.body.role);
+      const user = await userService.updateUserRole(target.id, newRole);
+      auditLogService.record({
+        category: 'security', action: 'user.role_change',
+        actorId: req.user!.userId, actorName: req.user!.username,
+        target: target.displayName || target.username,
+        detail: `角色：${target.role} → ${newRole}`,
+        result: 'success', ip: clientIp(req),
+      }).catch(() => {});
       res.status(200).json({ code: 200, data: user, message: '用户角色更新成功' });
     } catch (error: any) {
       res.status(400).json({ code: 400, data: null, message: '用户角色更新失败', error: safeErrorMessage(error) });
@@ -245,7 +387,23 @@ export class UserRoutes {
         return;
       }
 
-      const user = await userService.updateProfile(id, { displayName, region }, currentUser?.role === 'admin');
+      // 管理员编辑其他用户：需要密码验证，且目标不能是其他管理员
+      if (currentUser?.userId !== id) {
+        const target = await this.checkAdminAction(req, res, id, 'user.update', '编辑用户资料');
+        if (!target) return;
+        const user = await userService.updateProfile(id, { displayName, region }, true);
+        auditLogService.record({
+          category: 'security', action: 'user.update',
+          actorId: currentUser!.userId, actorName: currentUser!.username,
+          target: target.displayName || target.username,
+          detail: `编辑用户资料（显示名称/区域）`,
+          result: 'success', ip: clientIp(req),
+        }).catch(() => {});
+        res.status(200).json({ code: 200, data: user, message: '个人资料更新成功' });
+        return;
+      }
+
+      const user = await userService.updateProfile(id, { displayName, region }, false);
       res.status(200).json({ code: 200, data: user, message: '个人资料更新成功' });
     } catch (error: any) {
       res.status(400).json({ code: 400, data: null, message: '个人资料更新失败', error: safeErrorMessage(error) });
@@ -270,11 +428,24 @@ export class UserRoutes {
   }
 
   /**
-   * 管理员重置密码
+   * 管理员重置密码（可重置任何用户含其他管理员，但必须验证当前管理员本人密码）
    */
   private async adminResetPassword(req: Request, res: Response): Promise<void> {
+    const target = await this.checkAdminAction(
+      req, res, req.params.id as string,
+      'user.reset_password', '重置密码',
+      { allowAdminTarget: true, forbidSelf: true }
+    );
+    if (!target) return;
     try {
-      await userService.adminResetPassword(req.params.id as string, req.body.newPassword);
+      await userService.adminResetPassword(target.id, req.body.newPassword);
+      auditLogService.record({
+        category: 'security', action: 'user.reset_password',
+        actorId: req.user!.userId, actorName: req.user!.username,
+        target: target.displayName || target.username,
+        detail: `已重置用户 ${target.username} 的密码`,
+        result: 'success', ip: clientIp(req),
+      }).catch(() => {});
       res.status(200).json({ code: 200, data: { success: true }, message: '密码重置成功' });
     } catch (error: any) {
       res.status(400).json({ code: 400, data: null, message: '密码重置失败', error: safeErrorMessage(error) });

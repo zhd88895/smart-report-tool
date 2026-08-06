@@ -2,7 +2,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard, FileText, ClipboardList, Download, Bot,
   Users, Settings, SlidersHorizontal, ChevronLeft, ChevronRight,
-  Database, Sparkles, FileSearch, FileBarChart, Terminal,
+  Database, Sparkles, FileSearch, FileBarChart, Terminal, ScrollText,
 } from 'lucide-react';
 import { useAuthStore } from '@/stores/authStore';
 import { useUIStore } from '@/stores/uiStore';
@@ -59,6 +59,7 @@ const menuGroups: MenuGroup[] = [
     title: '系统',
     items: [
       { icon: Users, path: ROUTES.USERS, feature: 'users' },
+      { icon: ScrollText, path: ROUTES.SYSTEM_LOGS, feature: 'users' },
       { icon: SlidersHorizontal, path: ROUTES.SYSTEM_SETTINGS, feature: 'systemSettings' },
       { icon: Sparkles, path: ROUTES.AI_SETTINGS, feature: 'ai-settings' },
       { icon: Settings, path: ROUTES.SETTINGS, feature: 'settings' },

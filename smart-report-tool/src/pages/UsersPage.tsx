@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { Plus, Trash2, CheckCircle, XCircle, Pencil, KeyRound, Search, X as XIcon, Users as UsersIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -8,7 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { DataTable } from '@/components/common/DataTable';
-import { ConfirmDialog } from '@/components/common/ConfirmDialog';
+import { AdminPasswordDialog } from '@/components/common/AdminPasswordDialog';
 import { useUsers } from '@/hooks/useUsers';
 import { useAuthStore } from '@/stores/authStore';
 import { User, ScriptRegion } from '@/types';
@@ -22,13 +22,40 @@ export default function UsersPage() {
   const [activeTab, setActiveTab] = useState('all');
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<User | null>(null);
-  const [deleteConfirm2, setDeleteConfirm2] = useState(false); // 二次确认
   const [editTarget, setEditTarget] = useState<User | null>(null);
   const [editDisplayName, setEditDisplayName] = useState('');
   const [editRegion, setEditRegion] = useState('');
+  const [editRole, setEditRole] = useState<User['role']>('member');
   const [pwdTarget, setPwdTarget] = useState<User | null>(null);
   const [resetPwd, setResetPwd] = useState('');
   const [newUser, setNewUser] = useState({ username: '', password: '', displayName: '', role: 'member' as User['role'], region: '华南区' });
+
+  // ── 管理员密码二次验证（敏感操作确认后才弹出） ──
+  const [verifyOpen, setVerifyOpen] = useState(false);
+  const [verifyDesc, setVerifyDesc] = useState('');
+  const [verifyLoading, setVerifyLoading] = useState(false);
+  /** 待执行的敏感操作：返回 true 表示成功（关闭验证弹窗），false 保持弹窗供重试 */
+  const pendingActionRef = useRef<((adminPassword: string) => Promise<boolean>) | null>(null);
+
+  const requireAdminPassword = (description: string, action: (adminPassword: string) => Promise<boolean>) => {
+    setVerifyDesc(description);
+    pendingActionRef.current = action;
+    setVerifyOpen(true);
+  };
+
+  const handleVerifyConfirm = async (pwd: string) => {
+    if (!pendingActionRef.current) return;
+    setVerifyLoading(true);
+    try {
+      const ok = await pendingActionRef.current(pwd);
+      if (ok) {
+        setVerifyOpen(false);
+        pendingActionRef.current = null;
+      }
+    } finally {
+      setVerifyLoading(false);
+    }
+  };
   const [userSearch, setUserSearch] = useState('');
   const [roleFilter, setRoleFilter] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<string>('all');
@@ -37,8 +64,6 @@ export default function UsersPage() {
   const REGION_LIST: ScriptRegion[] = ['全部', '华南区', '西北区', '华东区', '东北区', '西南区', '华北区', '北京区', '华中区'];
 
   useEffect(() => { refreshUsers(); }, []);
-
-  const adminCount = users.filter((u) => u.role === 'admin').length;
 
   const ROLE_WEIGHT: Record<string, number> = { admin: 0, senior: 1, member: 2 };
 
@@ -61,54 +86,23 @@ export default function UsersPage() {
     return result;
   }, [users, userSearch, roleFilter, statusFilter, regionFilter]);
 
-  // ── 删除逻辑 ──
-  const canDelete = (target: User): string | null => {
-    if (!currentUser) return null;
-    // 不能删其他管理员
-    if (target.role === 'admin' && target.id !== currentUser.id) {
-      return '不能删除其他管理员账号';
-    }
-    // 最后一个管理员不能自删
-    if (target.id === currentUser.id && target.role === 'admin' && adminCount <= 1) {
-      return '系统中至少需要保留一个管理员，不能删除自己';
-    }
-    return null;
-  };
-
+  // ── 删除逻辑（后端强制：删除他人需验证当前管理员密码，管理员账户不可删除） ──
   const handleDeleteClick = (target: User) => {
-    const reason = canDelete(target);
-    if (reason) { toast.error(reason); return; }
-    // 自删需要二次确认
-    if (target.id === currentUser?.id) {
-      setDeleteTarget(target);
-      setDeleteConfirm2(false);
-    } else {
-      setDeleteTarget(target);
-      setDeleteConfirm2(true); // 非自删直接可删
-    }
+    if (target.role === 'admin') { toast.error('不能删除管理员账户'); return; }
+    setDeleteTarget(target);
   };
 
-  const confirmDelete = async () => {
+  const confirmDelete = () => {
     if (!deleteTarget) return;
     const target = deleteTarget;
     setDeleteTarget(null);
-    setDeleteConfirm2(false);
-    await removeUser(target.id);
-    toast.success('用户已删除');
-    refreshUsers();
-    // 如果删的是自己，退出登录
-    if (target.id === currentUser?.id) {
-      useAuthStore.getState().logout();
-      window.location.href = '/login';
-    }
-  };
-
-  const getDeleteDescription = () => {
-    if (!deleteTarget) return '';
-    if (deleteTarget.id === currentUser?.id) {
-      return `⚠️ 您正在删除自己的账户「${deleteTarget.displayName}」。删除后将立即退出登录。此操作不可撤销，是否继续？`;
-    }
-    return `确定要删除用户「${deleteTarget.displayName}」吗？`;
+    requireAdminPassword(`即将删除用户「${target.displayName}」（${target.username}），此操作不可撤销。`, async (pwd) => {
+      const res = await removeUser(target.id, pwd);
+      if (!res.success) { toast.error(res.error || '删除失败'); return false; }
+      toast.success('用户已删除');
+      refreshUsers();
+      return true;
+    });
   };
 
   // ── 编辑逻辑 ──
@@ -116,49 +110,75 @@ export default function UsersPage() {
     setEditTarget(target);
     setEditDisplayName(target.displayName || '');
     setEditRegion(target.region || '全部');
+    setEditRole(target.role);
   };
 
-  const handleEditSave = async () => {
+  const handleEditSave = () => {
     if (!editTarget) return;
+    const target = editTarget;
+    const roleChanged = editRole !== target.role;
     const updates: { displayName?: string; region?: string } = {};
-    if (editDisplayName !== editTarget.displayName) updates.displayName = editDisplayName;
-    if (editRegion !== (editTarget.region || '全部')) updates.region = editRegion;
-    if (Object.keys(updates).length > 0) {
-      const res = await updateProfile(editTarget.id, updates);
-      if (!res.success) { toast.error(res.error || '保存失败'); return; }
+    if (editDisplayName !== target.displayName) updates.displayName = editDisplayName;
+    if (editRegion !== (target.region || '全部')) updates.region = editRegion;
+
+    if (!roleChanged && Object.keys(updates).length === 0) {
+      toast.info('没有需要保存的修改');
+      setEditTarget(null);
+      return;
+    }
+
+    setEditTarget(null);
+    requireAdminPassword(`即将保存对用户「${target.displayName}」的修改。`, async (pwd) => {
+      // 角色变更走独立的敏感操作接口
+      if (roleChanged) {
+        const roleRes = await updateUserRole(target.id, editRole, pwd);
+        if (!roleRes.success) { toast.error(roleRes.error || '角色修改失败'); return false; }
+      }
+      if (Object.keys(updates).length > 0) {
+        const res = await updateProfile(target.id, { ...updates, adminPassword: pwd });
+        if (!res.success) { toast.error(res.error || '保存失败'); return false; }
+      }
       toast.success('修改已保存');
       refreshUsers();
-    }
-    setEditTarget(null);
+      return true;
+    });
   };
 
-  const handleResetPassword = async () => {
+  const handleResetPassword = () => {
     if (!pwdTarget || !resetPwd.trim()) { toast.error('请输入新密码'); return; }
     if (resetPwd.length < 6) { toast.error('密码至少6位'); return; }
-    const res = await resetPassword(pwdTarget.id, resetPwd.trim());
-    if (!res.success) { toast.error(res.error || '密码重置失败'); return; }
-    toast.success(`已重置 ${pwdTarget.displayName} 的密码`);
+    const target = pwdTarget;
+    const newPwd = resetPwd.trim();
     setPwdTarget(null);
     setResetPwd('');
+    requireAdminPassword(`即将重置用户「${target.displayName}」的登录密码。`, async (pwd) => {
+      const res = await resetPassword(target.id, newPwd, pwd);
+      if (!res.success) { toast.error(res.error || '密码重置失败'); return false; }
+      toast.success(`已重置 ${target.displayName} 的密码`);
+      return true;
+    });
   };
 
   // ── 其他 ──
-  const handleAddUser = async () => {
+  const handleAddUser = () => {
     if (!newUser.username || !newUser.password || !newUser.displayName) {
       toast.error('请填写完整信息');
       return;
     }
-    const result = await addUser(newUser);
-    if (!result.success) { toast.error(result.error || '创建失败'); return; }
+    const payload = { ...newUser };
     setShowAddDialog(false);
     setNewUser({ username: '', password: '', displayName: '', role: 'member', region: '华南区' });
-    toast.success('用户创建成功');
-    refreshUsers();
+    requireAdminPassword(`即将创建用户「${payload.displayName}」（${payload.username}）。`, async (pwd) => {
+      const result = await addUser({ ...payload, adminPassword: pwd });
+      if (!result.success) { toast.error(result.error || '创建失败'); return false; }
+      toast.success('用户创建成功');
+      refreshUsers();
+      return true;
+    });
   };
 
   const handleApprove = async (userId: string) => { await approveUser(userId); toast.success('用户已批准'); refreshUsers(); };
   const handleReject = async (userId: string) => { await rejectUser(userId); toast.success('用户已拒绝'); refreshUsers(); };
-  const handleRoleChange = async (userId: string, newRole: User['role']) => { await updateUserRole(userId, newRole); toast.success('角色已更新'); refreshUsers(); };
 
   const allColumns = [
     { key: 'username', header: '用户名' },
@@ -166,16 +186,13 @@ export default function UsersPage() {
     {
       key: 'role',
       header: '角色',
-      minWidth: 130,
+      minWidth: 90,
       render: (item: User) => (
-        <Select value={item.role} onValueChange={(v) => handleRoleChange(item.id, v as User['role'])}>
-          <SelectTrigger className="w-28 h-8 text-xs"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="admin">{ROLE_LABELS.admin}</SelectItem>
-            <SelectItem value="senior">{ROLE_LABELS.senior}</SelectItem>
-            <SelectItem value="member">{ROLE_LABELS.member}</SelectItem>
-          </SelectContent>
-        </Select>
+        <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${
+          item.role === 'admin' ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground'
+        }`}>
+          {ROLE_LABELS[item.role]}
+        </span>
       ),
     },
     {
@@ -200,15 +217,20 @@ export default function UsersPage() {
       render: (item: User) => (
         item.id === currentUser?.id ? null : (
           <div className="flex gap-1">
-            <Button variant="ghost" size="icon" className="h-8 w-8" title="编辑用户" onClick={() => openEdit(item)}>
-              <Pencil className="h-4 w-4" />
-            </Button>
+            {/* 管理员账户只能被重置密码，不能编辑/删除 */}
+            {item.role !== 'admin' && (
+              <Button variant="ghost" size="icon" className="h-8 w-8" title="编辑用户" onClick={() => openEdit(item)}>
+                <Pencil className="h-4 w-4" />
+              </Button>
+            )}
             <Button variant="ghost" size="icon" className="h-8 w-8" title="重置密码" onClick={() => { setPwdTarget(item); setResetPwd(''); }}>
               <KeyRound className="h-4 w-4" />
             </Button>
-            <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive" title="删除用户" onClick={() => handleDeleteClick(item)}>
-              <Trash2 className="h-4 w-4" />
-            </Button>
+            {item.role !== 'admin' && (
+              <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive" title="删除用户" onClick={() => handleDeleteClick(item)}>
+                <Trash2 className="h-4 w-4" />
+              </Button>
+            )}
           </div>
         )
       ),
@@ -375,7 +397,7 @@ export default function UsersPage() {
         </DialogContent>
       </Dialog>
 
-      {/* 编辑用户 */}
+      {/* 编辑用户（角色修改也在这里进行，需验证当前管理员密码） */}
       <Dialog open={!!editTarget} onOpenChange={() => setEditTarget(null)}>
         <DialogContent>
           <DialogHeader><DialogTitle>编辑用户 - {editTarget?.username}</DialogTitle></DialogHeader>
@@ -385,13 +407,24 @@ export default function UsersPage() {
               <Input value={editDisplayName} onChange={(e) => setEditDisplayName(e.target.value)} />
             </div>
             <div className="space-y-2">
+              <Label>角色</Label>
+              <Select value={editRole} onValueChange={(v) => setEditRole(v as User['role'])}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="admin">{ROLE_LABELS.admin}</SelectItem>
+                  <SelectItem value="senior">{ROLE_LABELS.senior}</SelectItem>
+                  <SelectItem value="member">{ROLE_LABELS.member}</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
               <Label>区域</Label>
               <Select value={editRegion} onValueChange={setEditRegion}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   {REGION_LIST.map((r) => (
-                    <SelectItem key={r} value={r} disabled={r === '全部' && editTarget?.role !== 'admin' && currentUser?.role !== 'admin'}>
-                      {r}{r === '全部' && editTarget?.role !== 'admin' ? ' (仅管理员)' : ''}
+                    <SelectItem key={r} value={r} disabled={r === '全部' && editRole !== 'admin'}>
+                      {r}{r === '全部' && editRole !== 'admin' ? ' (仅管理员)' : ''}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -405,7 +438,7 @@ export default function UsersPage() {
         </DialogContent>
       </Dialog>
 
-      {/* 重置密码 */}
+      {/* 重置密码（确认后触发管理员密码验证） */}
       <Dialog open={!!pwdTarget} onOpenChange={() => { setPwdTarget(null); setResetPwd(''); }}>
         <DialogContent>
           <DialogHeader><DialogTitle>重置密码 - {pwdTarget?.displayName}</DialogTitle></DialogHeader>
@@ -422,15 +455,29 @@ export default function UsersPage() {
         </DialogContent>
       </Dialog>
 
-      {/* 删除确认（支持二次确认） */}
-      <ConfirmDialog
-        open={!!deleteTarget}
-        onOpenChange={() => { setDeleteTarget(null); setDeleteConfirm2(false); }}
-        title={deleteTarget?.id === currentUser?.id ? '⚠️ 删除自己的账户' : '确认删除'}
-        description={getDeleteDescription()}
-        onConfirm={deleteConfirm2 ? confirmDelete : () => setDeleteConfirm2(true)}
-        destructive
-        confirmText={deleteConfirm2 ? '确认删除' : '继续'}
+      {/* 删除确认（确认后触发管理员密码验证） */}
+      <Dialog open={!!deleteTarget} onOpenChange={() => setDeleteTarget(null)}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>确认删除</DialogTitle></DialogHeader>
+          <div className="space-y-4 py-4">
+            <p className="text-sm text-muted-foreground">
+              确定要删除用户「{deleteTarget?.displayName}」（{deleteTarget?.username}）吗？此操作不可撤销。
+            </p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteTarget(null)}>取消</Button>
+            <Button variant="destructive" onClick={confirmDelete}>确认删除</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 管理员密码二次验证（所有敏感操作共用） */}
+      <AdminPasswordDialog
+        open={verifyOpen}
+        description={verifyDesc}
+        loading={verifyLoading}
+        onOpenChange={setVerifyOpen}
+        onConfirm={handleVerifyConfirm}
       />
     </div>
   );

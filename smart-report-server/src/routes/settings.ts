@@ -7,6 +7,7 @@
 import { Router, Request, Response } from 'express';
 import { authenticate } from '../middleware/auth';
 import { settingsService } from '../services/settingsService';
+import { auditLogService } from '../services/auditLogService';
 import { ApiResponse, safeErrorMessage } from '../types';
 import { getLogger } from '../utils/logger';
 
@@ -73,6 +74,20 @@ export class SettingsRoutes {
         req.user.userId,
         req.user.username,
       );
+
+      // 系统设置操作日志（敏感配置值打码）
+      const SENSITIVE_RE = /password|secret|api[-_]?key|token/i;
+      const detail = updates
+        .map((u) => `${u.key} = ${SENSITIVE_RE.test(u.key) ? '******' : String(u.value).slice(0, 100)}`)
+        .join('；');
+      auditLogService.record({
+        category: 'settings', action: 'settings.update',
+        actorId: req.user.userId, actorName: req.user.username,
+        target: updates.map((u) => u.key).join(', '),
+        detail: `修改系统设置：${detail}`,
+        result: 'success',
+        ip: (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.ip || '',
+      }).catch(() => {});
 
       res.json({ code: 200, data: { success: true }, message: '设置已更新' } satisfies ApiResponse<any>);
     } catch (err: any) {

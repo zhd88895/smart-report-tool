@@ -7,13 +7,13 @@ interface UserState {
   pendingUsers: User[];
   loading: boolean;
   fetchUsers: () => Promise<void>;
-  addUser: (params: { username: string; password: string; displayName: string; role: User['role']; region: string }) => Promise<{ success: boolean; error?: string }>;
-  removeUser: (id: string) => Promise<void>;
+  addUser: (params: { username: string; password: string; displayName: string; role: User['role']; region: string; adminPassword?: string }) => Promise<{ success: boolean; error?: string }>;
+  removeUser: (id: string, adminPassword?: string) => Promise<{ success: boolean; error?: string }>;
   approveUser: (id: string) => Promise<void>;
   rejectUser: (id: string) => Promise<void>;
-  updateUserRole: (id: string, role: User['role']) => Promise<void>;
-  updateProfile: (id: string, data: { displayName?: string; region?: string }) => Promise<{ success: boolean; error?: string; user?: User }>;
-  resetPassword: (id: string, newPassword: string) => Promise<{ success: boolean; error?: string }>;
+  updateUserRole: (id: string, role: User['role'], adminPassword?: string) => Promise<{ success: boolean; error?: string }>;
+  updateProfile: (id: string, data: { displayName?: string; region?: string; adminPassword?: string }) => Promise<{ success: boolean; error?: string; user?: User }>;
+  resetPassword: (id: string, newPassword: string, adminPassword?: string) => Promise<{ success: boolean; error?: string }>;
 }
 
 export const useUserStore = create<UserState>((set, get) => ({
@@ -28,7 +28,7 @@ export const useUserStore = create<UserState>((set, get) => ({
     set({ users: all, pendingUsers: all.filter((u) => u.status === 'pending'), loading: false });
   },
 
-  addUser: async (params: { username: string; password: string; displayName: string; role: User['role']; region: string }) => {
+  addUser: async (params: { username: string; password: string; displayName: string; role: User['role']; region: string; adminPassword?: string }) => {
     try {
       // Register creates user as 'pending' member; then update status+role
       await apiPost('/users/register', { username: params.username, password: params.password, displayName: params.displayName, region: params.region });
@@ -40,16 +40,28 @@ export const useUserStore = create<UserState>((set, get) => ({
     const created = ((data.data?.users || []) as User[]).find((u: User) => u.username === params.username);
     if (created) {
       if (params.role !== 'member') {
-        await apiPatch(`/users/${created.id}/role`, { role: params.role }).catch(() => {});
+        // 角色变更属敏感操作，需携带当前管理员密码
+        try {
+          await apiPatch(`/users/${created.id}/role`, { role: params.role, adminPassword: params.adminPassword });
+        } catch (e: any) {
+          await get().fetchUsers();
+          return { success: false, error: `用户已创建，但角色设置失败：${e?.message || '未知错误'}` };
+        }
       }
       await apiPatch(`/users/${created.id}/status`, { status: 'active' }).catch(() => {});
     }
+    await get().fetchUsers();
     return { success: true };
   },
 
-  removeUser: async (id: string) => {
-    await apiDelete(`/users/${id}`);
-    await get().fetchUsers();
+  removeUser: async (id: string, adminPassword?: string) => {
+    try {
+      await apiDelete(`/users/${id}`, undefined, adminPassword ? { adminPassword } : undefined);
+      await get().fetchUsers();
+      return { success: true };
+    } catch (e: any) {
+      return { success: false, error: e?.message || '删除用户失败' };
+    }
   },
 
   approveUser: async (id: string) => {
@@ -62,22 +74,29 @@ export const useUserStore = create<UserState>((set, get) => ({
     await get().fetchUsers();
   },
 
-  updateUserRole: async (id: string, role: User['role']) => {
-    await apiPatch(`/users/${id}/role`, { role });
-    await get().fetchUsers();
-  },
-
-  updateProfile: async (id: string, data: { displayName?: string; region?: string }) => {
-    const res = await apiPatch(`/users/${id}/profile`, data);
-    if (res.error) return { success: false, error: res.error };
-    const { password: _, ...safe } = res as any;
-    await get().fetchUsers();
-    return { success: true, user: safe as User };
-  },
-
-  resetPassword: async (id: string, newPassword: string) => {
+  updateUserRole: async (id: string, role: User['role'], adminPassword?: string) => {
     try {
-      await apiPost(`/users/${id}/change-password`, { newPassword });
+      await apiPatch(`/users/${id}/role`, { role, adminPassword });
+      await get().fetchUsers();
+      return { success: true };
+    } catch (e: any) {
+      return { success: false, error: e?.message || '角色更新失败' };
+    }
+  },
+
+  updateProfile: async (id: string, data: { displayName?: string; region?: string; adminPassword?: string }) => {
+    try {
+      await apiPatch(`/users/${id}/profile`, data);
+      await get().fetchUsers();
+      return { success: true };
+    } catch (e: any) {
+      return { success: false, error: e?.message || '个人资料更新失败' };
+    }
+  },
+
+  resetPassword: async (id: string, newPassword: string, adminPassword?: string) => {
+    try {
+      await apiPost(`/users/${id}/change-password`, { newPassword, adminPassword });
       return { success: true };
     } catch (e: any) {
       return { success: false, error: e?.message || '密码重置失败' };

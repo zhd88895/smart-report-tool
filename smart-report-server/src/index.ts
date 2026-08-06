@@ -37,6 +37,7 @@ import { conversationRoutes } from './routes/conversations';
 import { pythonVersionRoutes } from './routes/pythonVersions';
 import { AIRoutes } from './routes/ai';
 import { settingsRoutes } from './routes/settings';
+import { auditLogRoutes } from './routes/auditLogs';
 import { assetSupplementRoutes } from './routes/assetSupplements';
 import { knowledgeBaseRoutes } from './routes/knowledgeBase';
 import { aiConfigRoutes } from './routes/aiConfig';
@@ -185,6 +186,9 @@ app.use('/api/ai-config', aiConfigRoutes.getRouter());
 
 /** 文件路由 - /api/files/*（上传前 hash 预检查/秒传判定） */
 app.use('/api/files', apiLimiter, filesRoutes);
+
+/** 系统日志路由 - /api/audit-logs/*（审计/登录/设置/运行日志，仅管理员） */
+app.use('/api/audit-logs', auditLogRoutes.getRouter());
 
 // ═══════════════════════════════════════════════════════
 //  特殊端点

@@ -109,9 +109,19 @@ export async function apiPost(
   return res.json().catch(() => ({}));
 }
 
-export async function apiDelete(path: string, signal?: AbortSignal): Promise<any> {
-  const res = await fetchWithAuth(`${API_BASE}${path}`, { method: 'DELETE', signal });
-  if (!res.ok) throw new Error(`DELETE ${path} failed: ${res.status}`);
+export async function apiDelete(path: string, signal?: AbortSignal, body?: any): Promise<any> {
+  const res = await fetchWithAuth(`${API_BASE}${path}`, {
+    method: 'DELETE',
+    signal,
+    ...(body !== undefined
+      ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
+      : {}),
+  });
+  if (!res.ok) {
+    // 尽量透传后端的业务错误信息（如「管理员密码错误」）
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data?.message || data?.error || `DELETE ${path} failed: ${res.status}`);
+  }
   return res.json();
 }
 

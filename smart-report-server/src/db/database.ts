@@ -337,6 +337,22 @@ async function createSchema(): Promise<void> {
     CREATE INDEX IF NOT EXISTS idx_uai_models_user ON user_ai_models(user_id);
     CREATE INDEX IF NOT EXISTS idx_uai_models_provider ON user_ai_models(provider_id);
     CREATE INDEX IF NOT EXISTS idx_uai_usage_user ON user_ai_usage_logs(user_id, created_at);
+
+    -- 审计日志表：安全审计（security）/ 设置操作（settings）/ 登录（auth）
+    CREATE TABLE IF NOT EXISTS audit_logs (
+      id TEXT PRIMARY KEY,
+      category TEXT NOT NULL,
+      action TEXT NOT NULL,
+      actor_id TEXT,
+      actor_name TEXT,
+      target TEXT,
+      detail TEXT,
+      result TEXT NOT NULL DEFAULT 'success',
+      ip TEXT,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_audit_logs_category ON audit_logs(category, created_at);
   `;
 
   await execAsync(schema);
@@ -439,6 +455,10 @@ async function createSchema(): Promise<void> {
 
   // 迁移：为已存在的库补充 Python 环境配置（pip 镜像源，INSERT OR IGNORE 幂等）
   await migratePythonSettings();
+
+  // 迁移：隐藏系统设置页中的 Python 分类（与「脚本运行环境」页的设置重复，
+  // pip 镜像源等配置统一在脚本运行环境页调整；数据保留，仅不展示）
+  await runAsync(`UPDATE settings SET is_hidden = 1 WHERE category = 'python'`);
 
   // 迁移：上传文件 hash 去重索引表（内容寻址存储 data/uploads/dedup/）
   await runAsync(`CREATE TABLE IF NOT EXISTS file_hashes (

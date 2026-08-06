@@ -434,6 +434,20 @@ export class UserService {
   async getUserById(userId: string): Promise<User | null> {
     return userRepository.findById(userId);
   }
+
+  /**
+   * 校验指定用户的密码（用于管理员敏感操作前验证本人身份）
+   *
+   * @param userId - 用户ID
+   * @param password - 明文密码
+   * @returns 密码是否正确
+   */
+  async verifyPassword(userId: string, password: string): Promise<boolean> {
+    if (!password) return false;
+    const user = await userRepository.findById(userId);
+    if (!user) return false;
+    return bcrypt.compareSync(password, user.password);
+  }
 }
 
 /**

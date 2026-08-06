@@ -12,6 +12,7 @@ import ReportCreatePage from '@/pages/ReportCreatePage';
 import ReportsPage from '@/pages/ReportsPage';
 import AssistantPage from '@/pages/AssistantPage';
 import UsersPage from '@/pages/UsersPage';
+import SystemLogsPage from '@/pages/SystemLogsPage';
 import SettingsPage from '@/pages/SettingsPage';
 import SystemSettingsPage from '@/pages/SystemSettingsPage';
 import AISettingsPage from '@/pages/AISettingsPage';
@@ -30,6 +31,7 @@ export function AppRouter() {
         <Route path={ROUTES.REPORTS} element={<RouteGuard requiredFeature="reports"><ReportsPage /></RouteGuard>} />
         <Route path={ROUTES.ASSISTANT} element={<RouteGuard requiredFeature="assistant"><AssistantPage /></RouteGuard>} />
         <Route path={ROUTES.USERS} element={<RouteGuard requiredFeature="users"><UsersPage /></RouteGuard>} />
+        <Route path={ROUTES.SYSTEM_LOGS} element={<RouteGuard requiredFeature="users"><SystemLogsPage /></RouteGuard>} />
         {/* 对话记录已迁入个人设置（?tab=conversations），旧链接重定向兼容 */}
         <Route path={ROUTES.CONVERSATIONS} element={<Navigate to={`${ROUTES.SETTINGS}?tab=conversations`} replace />} />
         <Route path={ROUTES.SETTINGS} element={<RouteGuard requiredFeature="settings"><SettingsPage /></RouteGuard>} />
