@@ -34,6 +34,8 @@ export default function AssistantPage() {
   const [input, setInput] = useState('');
   const [deleteTarget, setDeleteTarget] = useState<Conversation | null>(null);
   const [streamingText, setStreamingText] = useState('');
+  // 本轮会话内每条助手消息的 token 用量（key 为消息时间戳，仅本次会话内新产生的消息有值）
+  const [roundUsage, setRoundUsage] = useState<Record<string, { prompt: number; completion: number }>>({});
   // 待确认卡片的本地终态（done/error=已处理；cancelled 归并到 error 展示）与请求进行中标记
   const [pendingStates, setPendingStates] = useState<Record<string, 'done' | 'error'>>({});
   const [pendingBusy, setPendingBusy] = useState<Record<string, boolean>>({});
@@ -95,6 +97,11 @@ export default function AssistantPage() {
       ...(result.toolCalls?.length ? { toolCalls: result.toolCalls } : {}),
       ...(result.pendingConfirm ? { pendingConfirm: result.pendingConfirm } : {}),
     };
+    // 记录本轮 token 用量，随消息气泡展示（.env 兜底调用无 usage，不展示）
+    if (result.usage) {
+      const u = result.usage;
+      setRoundUsage((p) => ({ ...p, [aiMsg.timestamp]: { prompt: u.promptTokens, completion: u.completionTokens } }));
+    }
     await appendMessage(currentConversation.id, aiMsg);
     fetchConversations(user?.id);
   };
@@ -183,6 +190,10 @@ export default function AssistantPage() {
   const isConfigured = !!current;
   const displayModel = current?.displayName || current?.modelId || '未配置';
   const providerName = current?.providerName || '未配置';
+  // 对话累计 token：从列表取最新数据（currentConversation 在 fetchConversations 后是旧快照）
+  const liveTokenUsage = currentConversation
+    ? (conversations.find((c) => c.id === currentConversation.id)?.tokenUsage ?? currentConversation.tokenUsage ?? null)
+    : null;
 
   return (
     <>
@@ -242,6 +253,15 @@ export default function AssistantPage() {
                 <Badge variant="secondary" className="text-[10px] h-5">{displayModel}</Badge>
               </CardTitle>
               <div className="flex items-center gap-2">
+                {liveTokenUsage && (
+                  <span
+                    className="text-xs text-muted-foreground tabular-nums"
+                    title={`本次对话累计消耗（共 ${liveTokenUsage.calls} 次调用）`}
+                  >
+                    本次对话 {liveTokenUsage.totalTokens.toLocaleString()} tokens
+                    （入 {liveTokenUsage.promptTokens.toLocaleString()} / 出 {liveTokenUsage.completionTokens.toLocaleString()}）
+                  </span>
+                )}
                 {currentConversation && <span className="text-xs text-muted-foreground">{formatDate(currentConversation.createdAt)}</span>}
                 <ModelSelector />
                 <Button variant="ghost" size="icon" className="h-7 w-7" title="AI 设置" onClick={() => navigate(ROUTES.AI_SETTINGS)}>
@@ -314,6 +334,12 @@ export default function AssistantPage() {
                             onConfirm={() => handleToolConfirm(msg.pendingConfirm!.pendingId)}
                             onCancel={() => handleToolCancel(msg.pendingConfirm!.pendingId)}
                           />
+                        )}
+                        {/* 本轮 token 消耗（仅本次会话新产生的助手消息有值） */}
+                        {msg.role === 'assistant' && roundUsage[msg.timestamp] && (
+                          <span className="text-[11px] text-muted-foreground/70 tabular-nums pl-1">
+                            本轮 入 {roundUsage[msg.timestamp].prompt.toLocaleString()} / 出 {roundUsage[msg.timestamp].completion.toLocaleString()} tokens
+                          </span>
                         )}
                       </div>
                       {msg.role === 'user' && (
