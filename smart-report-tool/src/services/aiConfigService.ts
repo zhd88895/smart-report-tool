@@ -191,6 +191,19 @@ export async function setDefaultModel(id: string): Promise<void> {
   await request<{ success: boolean }>(`/ai-config/models/${id}/set-default`, { method: 'PUT' });
 }
 
+/** 模型可用性测试结果 */
+export interface ModelTestResult {
+  ok: boolean;
+  latencyMs?: number;
+  reply?: string;
+  error?: string;
+}
+
+/** 测试指定模型：发送最小对话请求，校验能否正常返回内容并测量耗时 */
+export async function testModel(id: string): Promise<ModelTestResult> {
+  return request<ModelTestResult>(`/ai-config/models/${id}/test`, { method: 'POST' });
+}
+
 /** 拉取远端模型差量；doImport=true 时后端直接全量导入差量 */
 export async function fetchProviderModels(providerId: string, doImport = false): Promise<FetchModelsResult> {
   return request<FetchModelsResult>(`/ai-config/providers/${providerId}/fetch-models`, {

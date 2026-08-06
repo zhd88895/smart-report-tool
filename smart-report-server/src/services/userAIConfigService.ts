@@ -22,6 +22,7 @@ import {
   VENDOR_QUIRKS,
   fetchRemoteModels,
   testProviderConnection,
+  testModelConnection,
   type VendorKey,
 } from './aiProviderService';
 
@@ -459,6 +460,19 @@ export const userAIConfigService = {
       base_url: body.baseUrl ?? '',
       api_key: body.apiKey ?? '',
     });
+  },
+
+  /**
+   * 测试指定模型的可用性：加载用户自己的模型+厂商配置（隔离校验，
+   * 不存在返回 null），向该模型发送最小对话请求并测量耗时。
+   */
+  async testModel(
+    userId: string,
+    modelId: string
+  ): Promise<{ ok: boolean; latencyMs?: number; reply?: string; error?: string } | null> {
+    const row = await userAIConfigRepository.getModelWithProvider(userId, modelId);
+    if (!row) return null;
+    return testModelConnection(row.provider, row.model_id);
   },
 
   // ── 模型选择器数据源 / 用量统计 ──

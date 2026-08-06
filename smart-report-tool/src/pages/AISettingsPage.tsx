@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  Sparkles, Plus, Pencil, Trash2, Star, Download, Server,
+  Sparkles, Plus, Pencil, Trash2, Star, Download, Server, Zap, Loader2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
@@ -20,7 +20,7 @@ import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import {
   listProviders, deleteProvider, toggleProvider,
-  listModels, deleteModel, toggleModel, setDefaultModel,
+  listModels, deleteModel, toggleModel, setDefaultModel, testModel,
   fetchUsage, migrateLegacyConfig,
   type AIProvider, type AIModel, type UsageStats,
 } from '@/services/aiConfigService';
@@ -50,6 +50,9 @@ export default function AISettingsPage() {
   // 删除确认
   const [deleteProviderTarget, setDeleteProviderTarget] = useState<AIProvider | null>(null);
   const [deleteModelTarget, setDeleteModelTarget] = useState<AIModel | null>(null);
+
+  // 模型可用性测试进行中的模型 ID
+  const [testingModelId, setTestingModelId] = useState<string | null>(null);
 
   const selectedProvider = useMemo(
     () => providers.find((p) => p.id === selectedProviderId) ?? null,
@@ -209,6 +212,29 @@ export default function AISettingsPage() {
     }
   };
 
+  /** 测试模型可用性：发送最小对话请求，toast 展示耗时与回复摘要 */
+  const handleTestModel = async (m: AIModel) => {
+    setTestingModelId(m.id);
+    try {
+      const result = await testModel(m.id);
+      if (result.ok) {
+        toast.success(`「${m.displayName}」测试通过`, {
+          description: `耗时 ${((result.latencyMs ?? 0) / 1000).toFixed(1)}s${result.reply ? ` · 回复：${result.reply}` : ''}`,
+          duration: 6000,
+        });
+      } else {
+        toast.error(`「${m.displayName}」测试失败`, {
+          description: `${result.error || '未知错误'}${result.latencyMs != null ? `（耗时 ${(result.latencyMs / 1000).toFixed(1)}s）` : ''}`,
+          duration: 8000,
+        });
+      }
+    } catch (err: any) {
+      toast.error(`「${m.displayName}」测试失败`, { description: err.message || '请求失败', duration: 8000 });
+    } finally {
+      setTestingModelId(null);
+    }
+  };
+
   // ═══════════════════════════════════════════════════════
   //  渲染
   // ═══════════════════════════════════════════════════════
@@ -357,6 +383,18 @@ export default function AISettingsPage() {
                           <Switch checked={m.enabled} onCheckedChange={(v) => handleToggleModel(m, v)} />
                         </TableCell>
                         <TableCell className="text-right">
+                          <Button
+                            variant="ghost" size="icon" className="h-7 w-7"
+                            onClick={() => handleTestModel(m)}
+                            disabled={testingModelId !== null}
+                            title="测试模型可用性"
+                          >
+                            {testingModelId === m.id ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              <Zap className="h-3.5 w-3.5" />
+                            )}
+                          </Button>
                           <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEditModel(m)} title="编辑模型">
                             <Pencil className="h-3.5 w-3.5" />
                           </Button>

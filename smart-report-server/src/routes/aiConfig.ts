@@ -82,6 +82,8 @@ export class AIConfigRoutes {
     this.router.put('/models/:id/toggle', authenticate, this.toggleModel.bind(this));
     // 设为默认模型
     this.router.put('/models/:id/set-default', authenticate, this.setDefaultModel.bind(this));
+    // 测试模型可用性（发送最小对话请求，返回耗时与回复摘要）
+    this.router.post('/models/:id/test', authenticate, this.testModel.bind(this));
 
     // ── 辅助 ──
     // 测试连接（providerId 或内联厂商配置，不持久化）
@@ -376,6 +378,26 @@ export class AIConfigRoutes {
       res.status(200).json(response);
     } catch (error) {
       sendError(res, 400, '连接测试失败', error);
+    }
+  }
+
+  /** POST /models/:id/test — 测试模型可用性（真实对话请求） */
+  private async testModel(req: Request, res: Response): Promise<void> {
+    try {
+      const userId = req.user!.userId;
+      const result = await userAIConfigService.testModel(userId, req.params.id as string);
+      if (!result) {
+        sendNotFound(res);
+        return;
+      }
+      const response: ApiResponse<typeof result> = {
+        code: 200,
+        data: result,
+        message: result.ok ? '模型测试成功' : '模型测试失败',
+      };
+      res.status(200).json(response);
+    } catch (error) {
+      sendError(res, 400, '模型测试失败', error);
     }
   }
 

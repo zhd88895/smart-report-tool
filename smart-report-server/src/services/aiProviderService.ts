@@ -485,6 +485,66 @@ export async function fetchRemoteModels(provider: UserAIProvider): Promise<strin
 }
 
 /**
+ * 测试指定模型的可用性：用该模型发送一个最小对话请求，
+ * 校验能否正常返回内容，并测量耗时。
+ * 返回 { ok, latencyMs, reply?, error? }，不抛异常。
+ */
+export async function testModelConnection(
+  provider: Pick<UserAIProvider, 'vendor_key' | 'base_url' | 'api_key'>,
+  modelId: string
+): Promise<{ ok: boolean; latencyMs?: number; reply?: string; error?: string }> {
+  const startedAt = Date.now();
+  try {
+    const quirks = VENDOR_QUIRKS[provider.vendor_key as VendorKey] ?? VENDOR_QUIRKS.custom;
+    const baseUrl = provider.base_url || quirks.defaultBaseUrl;
+    if (!baseUrl) return { ok: false, error: '该厂商未配置 API 地址' };
+    if (!provider.api_key) return { ok: false, error: '未配置 API Key' };
+
+    const response = await fetch(`${baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: buildAuthHeaders(quirks, provider.api_key),
+      body: JSON.stringify({
+        model: modelId,
+        messages: [{ role: 'user', content: 'Hi，请用一句话回复确认你可以正常工作。' }],
+        // 给足输出额度：推理类模型（如 MiMo）会先消耗思考 token，额度过小会导致正文为空
+        [quirks.tokenParam]: 512,
+        stream: false,
+      }),
+      signal: AbortSignal.timeout(60000),
+    });
+
+    const latencyMs = Date.now() - startedAt;
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => '');
+      if (response.status === 401) return { ok: false, latencyMs, error: 'API Key 无效或已过期' };
+      if (response.status === 404) return { ok: false, latencyMs, error: `模型不存在或未开通（${modelId}）` };
+      if (response.status === 429) return { ok: false, latencyMs, error: '请求频率过高，请稍后再试' };
+      return { ok: false, latencyMs, error: `API 返回错误 (${response.status}): ${errorText.slice(0, 200)}` };
+    }
+
+    const data = (await response.json()) as any;
+    const choice = data?.choices?.[0] ?? {};
+    const reply: string = choice.message?.content ?? '';
+    if (reply && reply.trim()) {
+      return { ok: true, latencyMs, reply: reply.trim().slice(0, 120) };
+    }
+    // 正文为空但属于推理 token 用尽（finish_reason=length）或有推理内容：
+    // 说明模型正常响应了，只是输出额度被思考过程占满，视为可用
+    const reasoning: string = choice.message?.reasoning_content ?? '';
+    if (choice.finish_reason === 'length' || reasoning.trim()) {
+      return { ok: true, latencyMs, reply: '（推理模型：思考过程正常返回，正文被输出上限截断）' };
+    }
+    return { ok: false, latencyMs, error: '模型返回了空内容' };
+  } catch (e) {
+    const msg = (e as Error).message || '';
+    if (msg.includes('timed out') || msg.includes('TimeoutError') || (e as any)?.name === 'TimeoutError') {
+      return { ok: false, latencyMs: Date.now() - startedAt, error: '请求超时（60s），模型无响应' };
+    }
+    return { ok: false, latencyMs: Date.now() - startedAt, error: msg || '网络请求失败' };
+  }
+}
+
+/**
  * 测试厂商连接：发送一个最小「Hi」请求（max output = 16）。
  * 返回 { ok: true } 或 { ok: false, error }，不抛异常。
  */
