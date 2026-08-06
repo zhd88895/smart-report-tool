@@ -98,10 +98,14 @@ export function ReportListTable({
   return (
     <Card>
       <CardHeader className="pb-2">
-        <CardTitle className="text-base">报告列表</CardTitle>
+        <div className="flex items-center justify-between gap-2">
+          <CardTitle className="text-base">报告列表</CardTitle>
+          {/* 「列设置」按钮的外部容器：DataTable 通过 Portal 把按钮渲染到这里 */}
+          <div id={`${tableId || 'report-list'}-toolbar`} className="shrink-0" />
+        </div>
       </CardHeader>
       <CardContent>
-        <DataTable columns={columns} data={reports} keyExtractor={(item) => item.id} sortKey={sortKey} sortDir={sortDir} onSortChange={onSortChange} tableId={tableId} />
+        <DataTable columns={columns} data={reports} keyExtractor={(item) => item.id} sortKey={sortKey} sortDir={sortDir} onSortChange={onSortChange} tableId={tableId} toolbarContainerId={tableId ? `${tableId}-toolbar` : undefined} />
       </CardContent>
     </Card>
   );

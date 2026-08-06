@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Table,
   TableBody,
@@ -55,6 +56,12 @@ interface DataTableProps<T> {
    * 不传则行为与增强前完全一致。
    */
   tableId?: string;
+  /**
+   * 「列设置」按钮的外部容器元素 id。
+   * 传入后工具栏不再渲染在表格上方，而是通过 Portal 渲染到该容器内
+   * （例如卡片标题行右侧）。容器不存在时回退到表格上方。
+   */
+  toolbarContainerId?: string;
 }
 
 interface PersistedTableState {
@@ -103,7 +110,12 @@ function loadPersisted(tableId: string): PersistedTableState {
   }
 }
 
-export function DataTable<T>({ columns, data, rowKey, keyExtractor, pageSize = 10, sortKey, sortDir, onSortChange, tableId }: DataTableProps<T>) {
+export function DataTable<T>({ columns, data, rowKey, keyExtractor, pageSize = 10, sortKey, sortDir, onSortChange, tableId, toolbarContainerId }: DataTableProps<T>) {
+  // 「列设置」工具栏的外部渲染容器（如卡片标题行），首渲染时容器可能尚未挂载，需 effect 后再取值
+  const [toolbarEl, setToolbarEl] = useState<HTMLElement | null>(null);
+  useEffect(() => {
+    setToolbarEl(toolbarContainerId ? document.getElementById(toolbarContainerId) : null);
+  }, [toolbarContainerId]);
   const [page, setPage] = useState(1);
   const getKey = rowKey || keyExtractor || ((_row: T, index: number) => String(index));
 
@@ -268,7 +280,7 @@ export function DataTable<T>({ columns, data, rowKey, keyExtractor, pageSize = 1
 
   return (
     <div className="space-y-4">
-      {tableId && (
+      {tableId && !toolbarEl && (
         <div className="flex justify-end">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -290,6 +302,28 @@ export function DataTable<T>({ columns, data, rowKey, keyExtractor, pageSize = 1
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
+      )}
+      {tableId && toolbarEl && createPortal(
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="outline" size="sm">
+              <Settings2 className="h-4 w-4 mr-1" />列设置
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            {columns.filter((c) => c.hideable !== false).map((c) => (
+              <DropdownMenuCheckboxItem
+                key={c.key}
+                checked={!hiddenCols.includes(c.key)}
+                onCheckedChange={(checked) => toggleHidden(c.key, !!checked)}
+                onSelect={(e) => e.preventDefault()}
+              >
+                {c.header}
+              </DropdownMenuCheckboxItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>,
+        toolbarEl
       )}
       <div className="rounded-md border overflow-x-auto" ref={containerRef}>
         <Table style={tableId ? { tableLayout: 'fixed', width: totalWidth, minWidth: '100%' } : undefined}>
