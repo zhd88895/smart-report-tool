@@ -22,7 +22,7 @@ import {
 import { toast } from 'sonner';
 import {
   FolderPlus, Upload, Search, Trash2, Edit, FileText, FileCode,
-  Archive, RefreshCw, Folder, AlertCircle, Download,
+  Archive, RefreshCw, Folder, AlertCircle, Download, X,
 } from 'lucide-react';
 import { ConfirmDialog } from '@/components/common/ConfirmDialog';
 import { DataTable } from '@/components/common/DataTable';
@@ -91,12 +91,12 @@ export default function KnowledgeBasePage() {
   const [catName, setCatName] = useState('');
   const [catDesc, setCatDesc] = useState('');
 
-  // 文件上传对话框
+  // 文件上传对话框（支持批量）
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
-  const [uploadFile, setUploadFile] = useState<File | null>(null);
-  const [uploadTitle, setUploadTitle] = useState('');
+  const [uploadFiles, setUploadFiles] = useState<File[]>([]);
   const [uploadCategory, setUploadCategory] = useState<string>('');
   const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState('');
 
   // 删除确认对话框
   const [deleteCatTarget, setDeleteCatTarget] = useState<KBCategory | null>(null);
@@ -184,43 +184,70 @@ export default function KnowledgeBasePage() {
   // ── 文件操作 ──
 
   const openUpload = () => {
-    setUploadFile(null);
-    setUploadTitle('');
+    setUploadFiles([]);
     setUploadCategory(selectedCategoryId || '');
+    setUploadProgress('');
     setUploadDialogOpen(true);
   };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files?.[0];
-    if (!f) return;
-    if (f.size > 200 * 1024 * 1024) { toast.error('文件不能超过200MB'); return; }
-    setUploadFile(f);
-    if (!uploadTitle) setUploadTitle(f.name.replace(/\.[^.]+$/, ''));
+    const list = Array.from(e.target.files || []);
+    if (list.length === 0) return;
+    const valid = list.filter((f) => {
+      if (f.size > 200 * 1024 * 1024) {
+        toast.error(`「${f.name}」超过 200MB，已跳过`);
+        return false;
+      }
+      return true;
+    });
+    // 追加去重（同名同大小视为同一个文件）
+    setUploadFiles((prev) => {
+      const seen = new Set(prev.map((f) => `${f.name}_${f.size}`));
+      return [...prev, ...valid.filter((f) => !seen.has(`${f.name}_${f.size}`))];
+    });
+    e.target.value = ''; // 允许重复选择同一文件
+  };
+
+  const removeUploadFile = (index: number) => {
+    setUploadFiles((prev) => prev.filter((_, i) => i !== index));
   };
 
   const doUpload = async () => {
-    if (!uploadFile) { toast.error('请选择文件'); return; }
+    if (uploadFiles.length === 0) { toast.error('请选择文件'); return; }
     setUploading(true);
+    let ok = 0;
+    const failed: string[] = [];
     try {
-      const fd = new FormData();
-      fd.append('file', uploadFile);
-      fd.append('title', uploadTitle || uploadFile.name);
-      if (uploadCategory) fd.append('categoryId', uploadCategory);
-
-      const res = await fetch('/api/knowledge-base/files/upload', {
-        method: 'POST', body: fd, credentials: 'include',
-      });
-      const data = await res.json();
-      if (data.code === 200) {
-        toast.success(data.message);
-        setUploadDialogOpen(false);
-        loadFiles();
-        loadCategories();
-      } else {
-        toast.error(data.message || '上传失败');
+      for (let i = 0; i < uploadFiles.length; i++) {
+        const f = uploadFiles[i];
+        setUploadProgress(`正在上传 ${i + 1}/${uploadFiles.length}：${f.name}`);
+        try {
+          const fd = new FormData();
+          fd.append('file', f);
+          if (uploadCategory) fd.append('categoryId', uploadCategory);
+          const res = await fetch('/api/knowledge-base/files/upload', {
+            method: 'POST', body: fd, credentials: 'include',
+          });
+          const data = await res.json();
+          if (data.code === 200) {
+            ok++;
+          } else {
+            failed.push(`「${f.name}」${data.message || '上传失败'}`);
+          }
+        } catch (e: any) {
+          failed.push(`「${f.name}」${e.message}`);
+        }
       }
-    } catch (e: any) { toast.error(`上传失败: ${e.message}`); }
-    finally { setUploading(false); }
+      if (ok > 0) toast.success(`成功上传 ${ok} 个文件`);
+      failed.forEach((msg) => toast.error(msg));
+      if (failed.length === 0) setUploadDialogOpen(false);
+      setUploadFiles((prev) => prev.filter((f) => failed.some((m) => m.includes(`「${f.name}」`))));
+      loadFiles();
+      loadCategories();
+    } finally {
+      setUploading(false);
+      setUploadProgress('');
+    }
   };
 
   const deleteFile = (file: KBFile) => setDeleteFileTarget(file);
@@ -285,29 +312,20 @@ export default function KnowledgeBasePage() {
 
   const fileColumns = [
     {
-      key: 'title',
-      header: '标题',
+      key: 'file_name',
+      header: '文件名',
       sortable: true,
       flex: true,
       render: (file: KBFile) => (
         <span className="flex items-center gap-2 min-w-0">
           <span className="shrink-0">{getFileIcon(file.file_ext)}</span>
-          <span className="font-medium truncate">{file.title}</span>
+          <span className="font-medium truncate">{file.file_name}</span>
           {file.status === 'error' && (
             <Badge variant="destructive" className="text-xs shrink-0">
               <AlertCircle className="h-3 w-3 mr-1" />解析失败
             </Badge>
           )}
         </span>
-      ),
-    },
-    {
-      key: 'file_name',
-      header: '文件名',
-      sortable: true,
-      flex: true,
-      render: (file: KBFile) => (
-        <span className="text-sm text-muted-foreground block truncate">{file.file_name}</span>
       ),
     },
     {
@@ -530,16 +548,29 @@ export default function KnowledgeBasePage() {
           </DialogHeader>
           <div className="space-y-4 py-2">
             <div className="space-y-2">
-              <Label>选择文件 *</Label>
-              <Input type="file" onChange={handleFileSelect}
+              <Label>选择文件 *（可多选）</Label>
+              <Input type="file" multiple onChange={handleFileSelect}
                 accept=".md,.markdown,.html,.htm,.docx,.doc,.pdf,.txt,.text" />
-              <p className="text-xs text-muted-foreground">支持 MD、HTML、Word、PDF、TXT，最大200MB</p>
+              <p className="text-xs text-muted-foreground">支持 MD、HTML、Word、PDF、TXT，单文件最大200MB</p>
             </div>
-            <div className="space-y-2">
-              <Label>标题</Label>
-              <Input value={uploadTitle} onChange={(e) => setUploadTitle(e.target.value)}
-                placeholder="文件标题（默认为文件名）" />
-            </div>
+            {uploadFiles.length > 0 && (
+              <div className="space-y-1.5 max-h-48 overflow-y-auto rounded-md border p-2">
+                {uploadFiles.map((f, i) => (
+                  <div key={`${f.name}_${f.size}_${i}`} className="flex items-center justify-between gap-2 text-sm px-1 py-0.5">
+                    <span className="truncate">{f.name}</span>
+                    <span className="flex items-center gap-1 shrink-0">
+                      <span className="text-xs text-muted-foreground">{formatFileSize(f.size)}</span>
+                      <Button
+                        variant="ghost" size="icon" className="h-6 w-6 text-destructive hover:text-destructive"
+                        onClick={() => removeUploadFile(i)} disabled={uploading}
+                      >
+                        <X className="h-3 w-3" />
+                      </Button>
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
             <div className="space-y-2">
               <Label>分类</Label>
               <select
@@ -550,12 +581,17 @@ export default function KnowledgeBasePage() {
                 {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
             </div>
+            {uploading && uploadProgress && (
+              <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+                <LoadingSpinner className="inline-flex py-0" />{uploadProgress}
+              </p>
+            )}
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setUploadDialogOpen(false)}>取消</Button>
-            <Button onClick={doUpload} disabled={!uploadFile || uploading}>
+            <Button variant="outline" onClick={() => setUploadDialogOpen(false)} disabled={uploading}>取消</Button>
+            <Button onClick={doUpload} disabled={uploadFiles.length === 0 || uploading}>
               {uploading && <LoadingSpinner className="inline-flex py-0 mr-2" />}
-              上传
+              上传{uploadFiles.length > 0 ? `（${uploadFiles.length}）` : ''}
             </Button>
           </DialogFooter>
         </DialogContent>
