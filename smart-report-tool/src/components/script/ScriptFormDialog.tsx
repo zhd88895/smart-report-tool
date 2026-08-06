@@ -399,8 +399,8 @@ export function ScriptFormDialog({ open, onOpenChange, editTarget, onEditTargetC
       <Dialog open={open} onOpenChange={onOpenChange}>
         <DialogContent className="max-w-2xl max-h-[90vh] flex flex-col">
           <DialogHeader><DialogTitle>{editTarget ? '编辑脚本' : '上传脚本'}</DialogTitle></DialogHeader>
-          {/* 可滚动的表单区域；pr-1 -mr-1 补偿滚动条宽度 */}
-          <div className="flex-1 min-h-0 overflow-y-auto pr-1 -mr-1">
+          {/* 可滚动的表单区域；p-1 给焦点环留出显示空间，-m-1 补偿 padding 不影响布局 */}
+          <div className="flex-1 min-h-0 overflow-y-auto p-1 -m-1">
           <div className="space-y-4 pb-4">
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2"><Label>脚本名称</Label><Input value={meta.name} onChange={(e) => setMeta({ ...meta, name: e.target.value })} placeholder={editTarget ? undefined : '必填'} /></div>
