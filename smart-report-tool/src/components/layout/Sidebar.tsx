@@ -60,7 +60,7 @@ const menuGroups: MenuGroup[] = [
     items: [
       { icon: Users, path: ROUTES.USERS, feature: 'users' },
       { icon: SlidersHorizontal, path: ROUTES.SYSTEM_SETTINGS, feature: 'systemSettings' },
-      { icon: Sparkles, path: ROUTES.AI_SETTINGS, feature: 'ai-settings', indent: true },
+      { icon: Sparkles, path: ROUTES.AI_SETTINGS, feature: 'ai-settings' },
       { icon: Settings, path: ROUTES.SETTINGS, feature: 'settings' },
     ],
   },

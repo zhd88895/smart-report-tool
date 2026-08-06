@@ -17,7 +17,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Switch } from '@/components/ui/switch';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { toast } from 'sonner';
-import { Plus, Pencil, File, Upload, PackageOpen, Search, Check, X as XIcon, Trash2, AlertCircle } from 'lucide-react';
+import { Plus, Pencil, File, Upload, PackageOpen, Search, Check, X as XIcon, Trash2, AlertCircle, ChevronDown, ChevronUp } from 'lucide-react';
 import { ScriptEditor } from './ScriptEditor';
 import { ScriptFileCard } from './ScriptFileCard';
 import { PythonVersionSelector } from './PythonVersionSelector';
@@ -89,12 +89,18 @@ export function ScriptFormDialog({ open, onOpenChange, editTarget, onEditTargetC
   // 清空脚本文件确认弹窗
   const [showClearFilesDialog, setShowClearFilesDialog] = useState(false);
 
+  // 折叠区块：高级设置 / 模板与依赖（默认收起，每次打开对话框重置）
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [showDeps, setShowDeps] = useState(false);
+
   // 打开对话框时初始化表单（render 期间派生状态，避免旧数据闪现）：
   // 上传模式 = 重置为空表单；编辑模式 = 从 editTarget 回填
   const [prevOpen, setPrevOpen] = useState(false);
   if (open !== prevOpen) {
     setPrevOpen(open);
     if (open) {
+      setShowAdvanced(false);
+      setShowDeps(false);
       if (editTarget) {
         setMeta({ name: editTarget.name, description: editTarget.description, reportNameTemplate: editTarget.reportNameTemplate || '', scriptType: editTarget.scriptType, region: editTarget.region || '全部', inputFormats: editTarget.inputFormats || '', inputFormatManual: editTarget.inputFormatManual || false, version: editTarget.version, category: editTarget.category, templateRequired: editTarget.templateRequired, templateIds: [...editTarget.templateIds], auxiliaryFiles: dedupeAux([...editTarget.auxiliaryFiles]), extraFiles: dedupeAux([...(editTarget.extraFiles || [])]), requirements: editTarget.requirements || [], pythonVersion: editTarget.pythonVersion || 'embedded', isMultiFile: editTarget.isMultiFile || false });
         setRequirementsText((editTarget.requirements || []).join('\n'));
@@ -391,14 +397,41 @@ export function ScriptFormDialog({ open, onOpenChange, editTarget, onEditTargetC
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-2xl max-h-[90vh] flex flex-col">
           <DialogHeader><DialogTitle>{editTarget ? '编辑脚本' : '上传脚本'}</DialogTitle></DialogHeader>
-          <div className="space-y-4">
+          {/* 可滚动的表单区域；pr-1 -mr-1 补偿滚动条宽度 */}
+          <div className="flex-1 min-h-0 overflow-y-auto pr-1 -mr-1">
+          <div className="space-y-4 pb-4">
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2"><Label>脚本名称</Label><Input value={meta.name} onChange={(e) => setMeta({ ...meta, name: e.target.value })} placeholder={editTarget ? undefined : '必填'} /></div>
               <div className="space-y-2"><Label>版本号</Label><Input value={meta.version} onChange={(e) => setMeta({ ...meta, version: e.target.value })} placeholder="如 v1.0.0" /></div>
             </div>
             <div className="space-y-2"><Label>备注（{meta.description.length}/100）</Label><Textarea value={meta.description} onChange={(e) => setMeta({ ...meta, description: e.target.value })} placeholder={editTarget ? undefined : '选填，最多100字'} rows={2} maxLength={100} /></div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2"><Label>适用区域</Label>
+                <Select value={meta.region} onValueChange={(v) => setMeta({ ...meta, region: v as ScriptRegion })}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>{REGION_LIST.map((r) => (<SelectItem key={r} value={r}>{r}</SelectItem>))}</SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2"><Label>分类</Label>
+                <Select value={meta.category} onValueChange={(v) => setMeta({ ...meta, category: v as LogCategory })}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>{Object.entries(LOG_CATEGORY_LABELS).map(([k, v]) => (<SelectItem key={k} value={k}>{v}</SelectItem>))}</SelectContent>
+                </Select>
+              </div>
+            </div>
+            {/* 高级设置（默认收起）：报告命名规则、脚本类型、巡检数据格式 */}
+            <button
+              type="button"
+              className="flex w-full items-center gap-1.5 rounded-md px-2.5 py-2.5 text-sm text-muted-foreground hover:bg-muted/70 hover:text-foreground transition-colors"
+              onClick={() => setShowAdvanced(!showAdvanced)}
+            >
+              {showAdvanced ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+              高级设置 {showAdvanced ? '（点击收起）' : '（点击展开）'}
+            </button>
+            {showAdvanced && (
+            <div className="space-y-4 rounded-md border p-3">
             <div className="space-y-2">
               <Label>报告命名规则</Label>
               <Input value={meta.reportNameTemplate} onChange={(e) => setMeta({ ...meta, reportNameTemplate: e.target.value })} placeholder="留空使用默认命名" />
@@ -422,20 +455,6 @@ export function ScriptFormDialog({ open, onOpenChange, editTarget, onEditTargetC
                   })()}</span>
                 </p>
               )}
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2"><Label>适用区域</Label>
-                <Select value={meta.region} onValueChange={(v) => setMeta({ ...meta, region: v as ScriptRegion })}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>{REGION_LIST.map((r) => (<SelectItem key={r} value={r}>{r}</SelectItem>))}</SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2"><Label>分类</Label>
-                <Select value={meta.category} onValueChange={(v) => setMeta({ ...meta, category: v as LogCategory })}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>{Object.entries(LOG_CATEGORY_LABELS).map(([k, v]) => (<SelectItem key={k} value={k}>{v}</SelectItem>))}</SelectContent>
-                </Select>
-              </div>
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2"><Label>脚本类型</Label>
@@ -464,6 +483,8 @@ export function ScriptFormDialog({ open, onOpenChange, editTarget, onEditTargetC
                 )}
               </div>
             </div>
+            </div>
+            )}
             <div className="space-y-2">
               <div className="flex items-center gap-3">
                 <Label>脚本文件</Label>
@@ -723,6 +744,17 @@ export function ScriptFormDialog({ open, onOpenChange, editTarget, onEditTargetC
                 />
               )}
             </div>
+            {/* 模板与依赖（默认收起）：关联模板、辅助文件、Python 环境配置 */}
+            <button
+              type="button"
+              className="flex w-full items-center gap-1.5 rounded-md px-2.5 py-2.5 text-sm text-muted-foreground hover:bg-muted/70 hover:text-foreground transition-colors"
+              onClick={() => setShowDeps(!showDeps)}
+            >
+              {showDeps ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+              模板与依赖 {showDeps ? '（点击收起）' : '（点击展开）'}
+            </button>
+            {showDeps && (
+            <div className="space-y-4 rounded-md border p-3">
             <div className="flex items-center gap-2">
               <Switch checked={meta.templateRequired} onCheckedChange={(v) => setMeta({ ...meta, templateRequired: v })} />
               <Label className="cursor-pointer">需要关联模板生成报告</Label>
@@ -848,15 +880,19 @@ export function ScriptFormDialog({ open, onOpenChange, editTarget, onEditTargetC
                 })()}
               </div>
             )}
+            </div>
+            )}
           </div>
-          <DialogFooter>
+          </div>
+          {/* 固定在底部的按钮栏（不随表单滚动） */}
+          <div className="flex justify-end gap-2 pt-4 border-t">
             <Button variant="outline" onClick={() => onOpenChange(false)}>取消</Button>
             {editTarget ? (
               <Button onClick={handleEdit} disabled={uploading}>{uploading ? '保存中...' : '保存修改'}</Button>
             ) : (
               <Button onClick={handleUpload} disabled={uploading}>{uploading ? '上传中...' : '确认上传'}</Button>
             )}
-          </DialogFooter>
+          </div>
         </DialogContent>
       </Dialog>
 
