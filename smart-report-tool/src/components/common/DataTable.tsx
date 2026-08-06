@@ -34,6 +34,8 @@ interface Column<T> {
   hideable?: boolean;
   /** 弹性列：容器宽度变化时优先吸收多余/不足的宽度 */
   flex?: boolean;
+  /** 列内容对齐方式（表头与单元格同时生效，默认 left） */
+  align?: 'left' | 'center' | 'right';
 }
 
 interface DataTableProps<T> {
@@ -283,11 +285,13 @@ export function DataTable<T>({ columns, data, rowKey, keyExtractor, pageSize = 1
                 <TableHead
                   key={col.key}
                   style={tableId ? { width: widths[col.key] ?? baseWidth(col) } : { width: col.width }}
-                  className={tableId ? 'relative group border-r border-border last:border-r-0' : undefined}
+                  className={tableId
+                    ? `relative group border-r border-border last:border-r-0 ${col.align === 'center' ? 'text-center' : col.align === 'right' ? 'text-right' : ''}`
+                    : undefined}
                 >
                   {col.sortable ? (
                     <button
-                      className="inline-flex items-center gap-1 hover:text-foreground transition-colors"
+                      className={`inline-flex items-center gap-1 hover:text-foreground transition-colors ${col.align === 'center' ? 'justify-center w-full' : col.align === 'right' ? 'justify-end w-full' : ''}`}
                       onClick={() => handleSort(col.key)}
                     >
                       {col.header}
@@ -322,7 +326,10 @@ export function DataTable<T>({ columns, data, rowKey, keyExtractor, pageSize = 1
             {pageData.map((row, index) => (
               <TableRow key={getKey(row, index)}>
                 {visibleColumns.map((col) => (
-                  <TableCell key={col.key} className={tableId ? 'border-r border-border/60 last:border-r-0' : undefined}>
+                  <TableCell
+                    key={col.key}
+                    className={`${tableId ? 'border-r border-border/60 last:border-r-0' : ''} ${col.align === 'center' ? 'text-center' : col.align === 'right' ? 'text-right' : ''}`.trim() || undefined}
+                  >
                     {col.render ? col.render(row) : (row as unknown as Record<string, React.ReactNode>)[col.key]}
                   </TableCell>
                 ))}
