@@ -238,7 +238,7 @@ export default function UsersPage() {
   ];
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-2">
         <h2 className="text-2xl font-bold tracking-tight flex items-center gap-2">
           <UsersIcon className="h-6 w-6" />用户管理
@@ -257,7 +257,12 @@ export default function UsersPage() {
         </TabsList>
         <TabsContent value="all" className="mt-4">
           <Card>
-            <CardHeader className="pb-2"><CardTitle className="text-base">用户列表</CardTitle></CardHeader>
+            <CardHeader className="pt-4 pb-2">
+              <div className="flex items-center justify-between gap-2">
+                <CardTitle className="text-base">用户列表</CardTitle>
+                <div id="users-all-toolbar" className="shrink-0" />
+              </div>
+            </CardHeader>
             <CardContent className="space-y-4">
               {/* 搜索 + 筛选 */}
               <div className="space-y-3">
@@ -317,15 +322,20 @@ export default function UsersPage() {
                   </Select>
                 </div>
               </div>
-              <DataTable columns={allColumns} data={filteredUsers} keyExtractor={(item) => item.id} tableId="users-all" />
+              <DataTable columns={allColumns} data={filteredUsers} keyExtractor={(item) => item.id} tableId="users-all" tableClassName="text-[15px]" toolbarContainerId="users-all-toolbar" />
             </CardContent>
           </Card>
         </TabsContent>
         <TabsContent value="pending" className="mt-4">
           <Card>
-            <CardHeader className="pb-2"><CardTitle className="text-base">待审核用户</CardTitle></CardHeader>
+            <CardHeader className="pt-4 pb-2">
+              <div className="flex items-center justify-between gap-2">
+                <CardTitle className="text-base">待审核用户</CardTitle>
+                <div id="users-pending-toolbar" className="shrink-0" />
+              </div>
+            </CardHeader>
             <CardContent>
-              <DataTable columns={pendingColumns} data={pendingUsers} keyExtractor={(item) => item.id} tableId="users-pending" />
+              <DataTable columns={pendingColumns} data={pendingUsers} keyExtractor={(item) => item.id} tableId="users-pending" tableClassName="text-[15px]" toolbarContainerId="users-pending-toolbar" />
             </CardContent>
           </Card>
         </TabsContent>
