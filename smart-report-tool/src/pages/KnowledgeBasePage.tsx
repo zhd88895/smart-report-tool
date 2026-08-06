@@ -483,26 +483,28 @@ export default function KnowledgeBasePage() {
 
         {/* 右侧：文件列表 */}
         <div className="flex-1 min-w-0 space-y-4">
-          {/* 搜索栏 */}
-          <div className="flex gap-2">
-            <Input
-              placeholder="搜索文件标题或内容..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && doSearch()}
-              className="flex-1"
-            />
-            <Button variant="outline" onClick={doSearch}>
-              <Search className="h-4 w-4 mr-2" />搜索
-            </Button>
-            <Button variant="outline" onClick={loadFiles}>
-              {loading ? <LoadingSpinner className="inline-flex py-0" /> : <RefreshCw className="h-4 w-4" />}
-            </Button>
-          </div>
-
-          {/* 文件列表 */}
+          {/* 文件列表（搜索/刷新与列设置同一行） */}
           <Card>
-            <CardContent className={files.length === 0 ? 'p-0' : 'p-4'}>
+            <CardHeader className="pt-4 pb-2">
+              <div className="flex items-center gap-2">
+                <Input
+                  placeholder="搜索文件标题或内容..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && doSearch()}
+                  className="w-80 h-9"
+                />
+                <Button variant="outline" size="sm" className="h-9" onClick={doSearch}>
+                  <Search className="h-4 w-4 mr-1.5" />搜索
+                </Button>
+                <Button variant="outline" size="sm" className="h-9 px-2.5" onClick={loadFiles} title="刷新列表">
+                  {loading ? <LoadingSpinner className="inline-flex py-0" /> : <RefreshCw className="h-4 w-4" />}
+                </Button>
+                <div className="flex-1" />
+                <div id="kb-files-toolbar" className="shrink-0" />
+              </div>
+            </CardHeader>
+            <CardContent className={files.length === 0 ? 'p-0' : 'p-4 pt-0'}>
               {files.length === 0 ? (
                 <EmptyState
                   title="暂无文件"
@@ -514,6 +516,7 @@ export default function KnowledgeBasePage() {
                   data={files}
                   keyExtractor={(file) => file.id}
                   tableId="kb-files"
+                  toolbarContainerId="kb-files-toolbar"
                 />
               )}
             </CardContent>
