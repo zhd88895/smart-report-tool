@@ -8,7 +8,7 @@
  * - 后端运行日志：读取后端日志文件（今天+昨天），支持级别筛选
  */
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { ScrollText, RefreshCw, Search } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
@@ -47,6 +47,10 @@ const ACTION_LABELS: Record<string, string> = {
   'settings.update': '修改系统设置',
   'auth.login': '登录',
   'auth.logout': '登出',
+  'script.delete': '删除脚本',
+  'template.delete': '删除模板',
+  'kb.file_delete': '删除知识库文件',
+  'kb.category_delete': '删除知识库分类',
 };
 
 const RESULT_LABELS: Record<string, { text: string; cls: string }> = {
@@ -55,11 +59,12 @@ const RESULT_LABELS: Record<string, { text: string; cls: string }> = {
   denied: { text: '已拒绝', cls: 'bg-yellow-100 text-yellow-800' },
 };
 
-const LEVEL_COLORS: Record<string, string> = {
-  INFO: 'bg-blue-100 text-blue-800',
-  WARN: 'bg-yellow-100 text-yellow-800',
-  ERROR: 'bg-red-100 text-red-800',
-  DEBUG: 'bg-muted text-muted-foreground',
+/** 终端风格日志级别配色（深色底） */
+const TERM_LEVEL_COLORS: Record<string, string> = {
+  INFO: 'text-emerald-400',
+  WARN: 'text-amber-400',
+  ERROR: 'text-red-400',
+  DEBUG: 'text-slate-500',
 };
 
 function formatTime(iso: string): string {
@@ -135,17 +140,19 @@ function AuditTable({ category, refreshKey }: { category: string; refreshKey: nu
   );
 }
 
-/** 后端运行日志表格 */
-function RuntimeLogTable({ refreshKey }: { refreshKey: number }) {
+/** 后端运行日志终端（深色终端风格，按时间正序显示，加载后自动滚动到最新行） */
+function RuntimeLogTerminal({ refreshKey }: { refreshKey: number }) {
   const [logs, setLogs] = useState<RuntimeLog[]>([]);
   const [loading, setLoading] = useState(false);
   const [level, setLevel] = useState('all');
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   const load = useCallback(async (lv: string) => {
     setLoading(true);
     try {
       const data = await apiGet(`/audit-logs/runtime?lines=500${lv !== 'all' ? `&level=${lv}` : ''}`);
-      setLogs(data.data?.logs || []);
+      // 接口返回为倒序（最新在前），终端视图按时间正序排列，最新行在最底部
+      setLogs((data.data?.logs || []).slice().reverse());
     } catch (e: any) {
       toast.error(e?.message || '运行日志加载失败');
     } finally {
@@ -155,17 +162,11 @@ function RuntimeLogTable({ refreshKey }: { refreshKey: number }) {
 
   useEffect(() => { load(level); }, [load, level, refreshKey]);
 
-  const columns = [
-    { key: 'timestamp', header: '时间', width: '200px', minWidth: 180, render: (l: RuntimeLog) => <span className="text-xs tabular-nums">{formatTime(l.timestamp)}</span> },
-    {
-      key: 'level', header: '级别', width: '90px', minWidth: 80, align: 'center' as const,
-      render: (l: RuntimeLog) => (
-        <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${LEVEL_COLORS[l.level] || 'bg-muted'}`}>{l.level}</span>
-      ),
-    },
-    { key: 'module', header: '模块', width: '150px', minWidth: 110, render: (l: RuntimeLog) => <span className="text-sm">{l.module}</span> },
-    { key: 'message', header: '内容', flex: true, render: (l: RuntimeLog) => <span className="text-sm break-all">{l.message}</span> },
-  ];
+  // 每次日志数据更新后自动滚动到底部（最新行），符合实时日志阅读习惯
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [logs]);
 
   return (
     <div className="space-y-3">
@@ -179,13 +180,27 @@ function RuntimeLogTable({ refreshKey }: { refreshKey: number }) {
             <SelectItem value="ERROR">ERROR</SelectItem>
           </SelectContent>
         </Select>
-        <span className="text-xs text-muted-foreground">显示今天与昨天的运行日志（最新 500 条）</span>
+        <span className="text-xs text-muted-foreground">显示今天与昨天的运行日志（最新 500 条），已自动定位到最新行</span>
       </div>
-      {loading ? (
-        <LoadingSpinner text="加载中..." className="py-8" />
-      ) : (
-        <DataTable columns={columns} data={logs} keyExtractor={(l) => `${l.timestamp}-${l.module}-${l.message.slice(0, 30)}`} tableId="audit-runtime" tableClassName="text-sm" toolbarContainerId="audit-runtime-toolbar" />
-      )}
+      <div
+        ref={scrollRef}
+        className="h-[560px] overflow-y-auto rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 font-mono text-xs leading-6 shadow-inner"
+      >
+        {loading ? (
+          <div className="text-slate-500">加载中...</div>
+        ) : logs.length === 0 ? (
+          <div className="text-slate-500">暂无日志</div>
+        ) : (
+          logs.map((l, i) => (
+            <div key={`${l.timestamp}-${i}`} className="flex gap-2 px-1 rounded hover:bg-slate-900/70">
+              <span className="shrink-0 select-none text-slate-500 tabular-nums">{formatTime(l.timestamp)}</span>
+              <span className={`shrink-0 select-none w-11 font-semibold ${TERM_LEVEL_COLORS[l.level] || 'text-slate-400'}`}>{l.level}</span>
+              <span className="shrink-0 select-none text-cyan-400">[{l.module}]</span>
+              <span className="text-slate-200 break-all whitespace-pre-wrap">{l.message}</span>
+            </div>
+          ))
+        )}
+      </div>
     </div>
   );
 }
@@ -232,13 +247,10 @@ export default function SystemLogsPage() {
         <TabsContent value="runtime" className="mt-4">
           <Card>
             <CardHeader className="pt-4 pb-2">
-              <div className="flex items-center justify-between gap-2">
-                <CardTitle className="text-base">后端运行日志</CardTitle>
-                <div id="audit-runtime-toolbar" className="shrink-0" />
-              </div>
+              <CardTitle className="text-base">后端运行日志</CardTitle>
             </CardHeader>
             <CardContent>
-              <RuntimeLogTable refreshKey={refreshKey} />
+              <RuntimeLogTerminal refreshKey={refreshKey} />
             </CardContent>
           </Card>
         </TabsContent>

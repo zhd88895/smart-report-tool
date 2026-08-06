@@ -11,6 +11,7 @@ import { Router, Request, Response } from 'express';
 import { templateRepository } from '../db/repositories';
 import { fileManager, safeMoveFile } from '../utils/file';
 import { authenticate, authorize } from '../middleware/auth';
+import { requirePasswordConfirm, auditSensitiveSuccess } from '../middleware/sensitiveGuard';
 import { uploadTemplateFile } from '../middleware/upload';
 import { settingsService } from '../services/settingsService';
 import { ApiResponse, safeErrorMessage } from '../types';
@@ -53,8 +54,8 @@ export class TemplateRoutes {
     // 更新模板（需要认证）
     this.router.put('/:id', authenticate, this.updateTemplate.bind(this));
 
-    // 删除模板（需要认证）
-    this.router.delete('/:id', authenticate, this.deleteTemplate.bind(this));
+    // 删除模板（需要认证 + 本人密码二次验证，操作写入安全审计日志）
+    this.router.delete('/:id', authenticate, requirePasswordConfirm('template.delete', '删除模板'), this.deleteTemplate.bind(this));
 
     // 下载模板文件（需要认证）
     this.router.get(
@@ -256,6 +257,8 @@ export class TemplateRoutes {
 
       // 从数据库中删除
       await templateRepository.delete(id);
+
+      auditSensitiveSuccess(req, 'template.delete', `已删除模板「${existing.name || id}」`, existing.name || id);
 
       const response: ApiResponse<{ success: boolean }> = {
         code: 200,

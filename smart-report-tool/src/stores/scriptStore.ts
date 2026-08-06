@@ -8,7 +8,7 @@ interface ScriptState {
   fetchScripts: () => Promise<void>;
   updateScript: (id: string, updates: Partial<Script>) => Promise<void>;
   updateScriptWithAuxFiles: (id: string, formData: FormData) => Promise<void>;
-  removeScript: (id: string) => Promise<void>;
+  removeScript: (id: string, adminPassword?: string) => Promise<void>;
 }
 
 export const useScriptStore = create<ScriptState>((set, get) => ({
@@ -38,8 +38,8 @@ export const useScriptStore = create<ScriptState>((set, get) => ({
     await get().fetchScripts();
   },
 
-  removeScript: async (id: string) => {
-    await apiDelete(`/scripts/${id}`);
+  removeScript: async (id: string, adminPassword?: string) => {
+    await apiDelete(`/scripts/${id}`, undefined, adminPassword ? { adminPassword } : undefined);
     await get().fetchScripts();
   },
 }));

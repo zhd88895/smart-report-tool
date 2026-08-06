@@ -25,6 +25,7 @@ import {
   Archive, RefreshCw, Folder, AlertCircle, Download, X,
 } from 'lucide-react';
 import { ConfirmDialog } from '@/components/common/ConfirmDialog';
+import { AdminPasswordDialog } from '@/components/common/AdminPasswordDialog';
 import { DataTable } from '@/components/common/DataTable';
 import { EmptyState } from '@/components/common/EmptyState';
 import { LoadingSpinner } from '@/components/common/LoadingSpinner';
@@ -166,19 +167,47 @@ export default function KnowledgeBasePage() {
 
   const deleteCategory = (cat: KBCategory) => setDeleteCatTarget(cat);
 
-  const confirmDeleteCategory = async () => {
+  /** 删除类高危操作（分类/文件）统一走密码二次验证 */
+  const [pwdAction, setPwdAction] = useState<{ kind: 'file' | 'category'; id: string; label: string } | null>(null);
+  const [pwdLoading, setPwdLoading] = useState(false);
+
+  const confirmDeleteCategory = () => {
     const cat = deleteCatTarget;
     if (!cat) return;
     setDeleteCatTarget(null);
+    setPwdAction({ kind: 'category', id: cat.id, label: cat.name });
+  };
+
+  /** 输入密码后执行删除；失败（含密码错误）时弹窗保持打开可重试 */
+  const handlePwdConfirm = async (password: string) => {
+    const action = pwdAction;
+    if (!action) return;
+    setPwdLoading(true);
     try {
-      await fetch(`/api/knowledge-base/categories/${cat.id}`, {
-        method: 'DELETE', credentials: 'include',
+      const url = action.kind === 'file'
+        ? `/api/knowledge-base/files/${action.id}`
+        : `/api/knowledge-base/categories/${action.id}`;
+      const res = await fetch(url, {
+        method: 'DELETE',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ adminPassword: password }),
       });
-      toast.success('分类删除成功');
-      if (selectedCategoryId === cat.id) setSelectedCategoryId(undefined);
+      const data = await res.json().catch(() => null);
+      if (!res.ok || data?.code !== 200) {
+        toast.error(data?.message || '删除失败');
+        return; // 保持弹窗打开
+      }
+      toast.success(action.kind === 'file' ? '文件删除成功' : '分类删除成功');
+      if (action.kind === 'category' && selectedCategoryId === action.id) setSelectedCategoryId(undefined);
+      setPwdAction(null);
       loadCategories();
       loadFiles();
-    } catch (e: any) { toast.error(`删除失败: ${e.message}`); }
+    } catch (e: any) {
+      toast.error(`删除失败: ${e.message}`);
+    } finally {
+      setPwdLoading(false);
+    }
   };
 
   // ── 文件操作 ──
@@ -281,18 +310,11 @@ export default function KnowledgeBasePage() {
     finally { setReparsingId(null); }
   };
 
-  const confirmDeleteFile = async () => {
+  const confirmDeleteFile = () => {
     const file = deleteFileTarget;
     if (!file) return;
     setDeleteFileTarget(null);
-    try {
-      await fetch(`/api/knowledge-base/files/${file.id}`, {
-        method: 'DELETE', credentials: 'include',
-      });
-      toast.success('文件删除成功');
-      loadFiles();
-      loadCategories();
-    } catch (e: any) { toast.error(`删除失败: ${e.message}`); }
+    setPwdAction({ kind: 'file', id: file.id, label: file.title || file.file_name });
   };
 
   const doSearch = async () => {
@@ -618,6 +640,16 @@ export default function KnowledgeBasePage() {
         description={deleteFileTarget ? `确定删除文件"${deleteFileTarget.title}"吗？` : ''}
         onConfirm={confirmDeleteFile}
         destructive
+      />
+
+      {/* 删除类高危操作的密码二次验证 */}
+      <AdminPasswordDialog
+        open={!!pwdAction}
+        onOpenChange={(open) => { if (!open) setPwdAction(null); }}
+        verifierLabel="您自己"
+        description={pwdAction ? `即将删除${pwdAction.kind === 'file' ? '文件' : '分类'}「${pwdAction.label}」，此操作不可撤销。` : ''}
+        loading={pwdLoading}
+        onConfirm={(pwd) => { void handlePwdConfirm(pwd); }}
       />
     </div>
   );

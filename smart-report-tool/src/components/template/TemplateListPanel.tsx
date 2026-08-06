@@ -6,6 +6,7 @@ import { canAccess } from '@/utils/permissions';
 import { DocTemplate } from '@/types';
 import { formatFileSize } from '@/utils/formatters';
 import { ConfirmDialog } from '@/components/common/ConfirmDialog';
+import { AdminPasswordDialog } from '@/components/common/AdminPasswordDialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -23,9 +24,27 @@ export function TemplateListPanel({ onEditTemplate }: TemplateListPanelProps) {
   const { docTemplates, removeDocTemplate } = useDocTemplateStore();
   const canManage = canAccess(user?.role, 'scripts');
   const [deleteTplTarget, setDeleteTplTarget] = useState<DocTemplate | null>(null);
+  const [pwdTarget, setPwdTarget] = useState<DocTemplate | null>(null);
+  const [pwdLoading, setPwdLoading] = useState(false);
 
-  const handleDeleteTpl = async () => {
-    if (deleteTplTarget) { await removeDocTemplate(deleteTplTarget.id); setDeleteTplTarget(null); toast.success('已删除'); }
+  /** 确认删除后进入密码二次验证 */
+  const handleDeleteTpl = () => {
+    if (deleteTplTarget) { setPwdTarget(deleteTplTarget); setDeleteTplTarget(null); }
+  };
+
+  /** 输入密码后执行删除；失败时弹窗保持打开可重试 */
+  const handlePwdConfirm = async (password: string) => {
+    if (!pwdTarget) return;
+    setPwdLoading(true);
+    try {
+      await removeDocTemplate(pwdTarget.id, password);
+      setPwdTarget(null);
+      toast.success('已删除');
+    } catch (err: any) {
+      toast.error(err.message || '删除失败');
+    } finally {
+      setPwdLoading(false);
+    }
   };
 
   const handleTplDownload = (tpl: DocTemplate) => {
@@ -73,6 +92,15 @@ export function TemplateListPanel({ onEditTemplate }: TemplateListPanelProps) {
       )}
 
       <ConfirmDialog open={!!deleteTplTarget} onOpenChange={() => setDeleteTplTarget(null)} onConfirm={handleDeleteTpl} title="删除模板" description={`确定要删除「${deleteTplTarget?.name}」吗？`} />
+
+      <AdminPasswordDialog
+        open={!!pwdTarget}
+        onOpenChange={(open) => { if (!open) setPwdTarget(null); }}
+        verifierLabel="您自己"
+        description={pwdTarget ? `即将删除模板「${pwdTarget.name}」，此操作不可撤销。` : ''}
+        loading={pwdLoading}
+        onConfirm={(pwd) => { void handlePwdConfirm(pwd); }}
+      />
     </>
   );
 }

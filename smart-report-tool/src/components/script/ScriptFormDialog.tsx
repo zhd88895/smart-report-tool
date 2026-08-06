@@ -8,6 +8,7 @@ import { canAccess } from '@/utils/permissions';
 import { formatFileSize } from '@/utils/formatters';
 import { FileUploader, getFilePath } from '@/components/common/FileUploader';
 import { ConfirmDialog } from '@/components/common/ConfirmDialog';
+import { AdminPasswordDialog } from '@/components/common/AdminPasswordDialog';
 import { EmptyState } from '@/components/common/EmptyState';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -94,6 +95,8 @@ export function ScriptFormDialog({ open, onOpenChange, editTarget, onEditTargetC
 
   // 删除脚本确认弹窗
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showDeletePwd, setShowDeletePwd] = useState(false);
+  const [deletePwdLoading, setDeletePwdLoading] = useState(false);
 
   // 折叠区块：高级设置 / 模板与依赖 / 巡检工具（默认收起，每次打开对话框重置）
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -430,17 +433,20 @@ export function ScriptFormDialog({ open, onOpenChange, editTarget, onEditTargetC
     return false;
   };
 
-  /** 删除当前编辑的脚本 */
-  const handleDeleteScript = async () => {
+  /** 删除当前编辑的脚本（确认后需输入本人登录密码二次验证） */
+  const handleDeleteScript = async (adminPassword: string) => {
     if (!editTarget) return;
+    setDeletePwdLoading(true);
     try {
       const { removeScript } = useScriptStore.getState();
-      await removeScript(editTarget.id);
+      await removeScript(editTarget.id, adminPassword);
       toast.success('脚本已删除');
-      setShowDeleteConfirm(false);
+      setShowDeletePwd(false);
       onOpenChange(false); // 关闭编辑对话框
     } catch (err: any) {
-      toast.error(err.message || '删除失败');
+      toast.error(err.message || '删除失败'); // 密码错误时弹窗保持打开，可重试
+    } finally {
+      setDeletePwdLoading(false);
     }
   };
 
@@ -1023,10 +1029,19 @@ export function ScriptFormDialog({ open, onOpenChange, editTarget, onEditTargetC
       <ConfirmDialog
         open={showDeleteConfirm}
         onOpenChange={setShowDeleteConfirm}
-        onConfirm={handleDeleteScript}
+        onConfirm={() => { setShowDeleteConfirm(false); setShowDeletePwd(true); }}
         title="删除脚本"
         description={`确定要删除「${editTarget?.name}」v${editTarget?.version} 吗？此操作不可撤销。`}
         destructive
+      />
+
+      <AdminPasswordDialog
+        open={showDeletePwd}
+        onOpenChange={setShowDeletePwd}
+        verifierLabel="您自己"
+        description={`即将删除脚本「${editTarget?.name || ''}」，此操作不可撤销。`}
+        loading={deletePwdLoading}
+        onConfirm={(pwd) => { void handleDeleteScript(pwd); }}
       />
 
       {/* ═════ Template Picker ═════ */}

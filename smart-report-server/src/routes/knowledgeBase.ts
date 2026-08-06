@@ -12,6 +12,7 @@
 
 import { Router, Request, Response, NextFunction } from 'express';
 import { authenticate } from '../middleware/auth';
+import { requirePasswordConfirm, auditSensitiveSuccess } from '../middleware/sensitiveGuard';
 import { knowledgeBaseRepository, KBCategory, KBFile } from '../db/repositories/knowledgeBaseRepository';
 import { ApiResponse } from '../types';
 import { getLogger, generateTraceId } from '../utils/logger';
@@ -213,11 +214,12 @@ router.put('/categories/:id', authenticate, async (req: Request, res: Response) 
   }
 });
 
-// 删除分类
-router.delete('/categories/:id', authenticate, async (req: Request, res: Response) => {
+// 删除分类（需本人密码二次验证，操作写入安全审计日志）
+router.delete('/categories/:id', authenticate, requirePasswordConfirm('kb.category_delete', '删除知识库分类'), async (req: Request, res: Response) => {
   const id = req.params.id as string;
   try {
     await knowledgeBaseRepository.deleteCategory(id);
+    auditSensitiveSuccess(req, 'kb.category_delete', `已删除知识库分类（ID: ${id}）`, id);
     res.json({ code: 200, data: null, message: '分类删除成功' } as ApiResponse<null>);
   } catch (err: any) {
     res.status(500).json({ code: 500, data: null, message: '删除分类失败', error: err.message } as ApiResponse<null>);
@@ -431,8 +433,8 @@ router.get('/files/:id/download', authenticate, async (req: Request, res: Respon
   }
 });
 
-// 删除文件
-router.delete('/files/:id', authenticate, async (req: Request, res: Response) => {
+// 删除文件（需本人密码二次验证，操作写入安全审计日志）
+router.delete('/files/:id', authenticate, requirePasswordConfirm('kb.file_delete', '删除知识库文件'), async (req: Request, res: Response) => {
   const id = req.params.id as string;
   try {
     const file = await knowledgeBaseRepository.findFileById(id);
@@ -445,6 +447,7 @@ router.delete('/files/:id', authenticate, async (req: Request, res: Response) =>
       await fs.unlink(file.file_path).catch(() => {});
     }
     await knowledgeBaseRepository.deleteFile(id);
+    auditSensitiveSuccess(req, 'kb.file_delete', `已删除知识库文件「${file.title || file.file_name || id}」`, file.title || file.file_name || id);
     res.json({ code: 200, data: null, message: '文件删除成功' } as ApiResponse<null>);
   } catch (err: any) {
     res.status(500).json({ code: 500, data: null, message: '删除文件失败', error: err.message } as ApiResponse<null>);

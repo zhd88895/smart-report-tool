@@ -15,13 +15,15 @@ export interface AdminPasswordDialogProps {
   open: boolean;
   /** 操作描述，如「删除用户 张三」 */
   description?: string;
+  /** 验证者身份提示，默认「您自己（当前管理员）」；普通用户场景可传「您自己」 */
+  verifierLabel?: string;
   loading?: boolean;
   onOpenChange: (open: boolean) => void;
   /** 点击确认验证；密码错误时请保持弹窗打开（由调用方决定返回 void） */
   onConfirm: (password: string) => void;
 }
 
-export function AdminPasswordDialog({ open, description, loading, onOpenChange, onConfirm }: AdminPasswordDialogProps) {
+export function AdminPasswordDialog({ open, description, verifierLabel = '您自己（当前管理员）', loading, onOpenChange, onConfirm }: AdminPasswordDialogProps) {
   const [pwd, setPwd] = useState('');
 
   // 每次打开清空上次输入
@@ -37,12 +39,12 @@ export function AdminPasswordDialog({ open, description, loading, onOpenChange, 
         </DialogHeader>
         <div className="space-y-3 py-2">
           {description && <p className="text-sm text-muted-foreground">{description}</p>}
-          <p className="text-sm">请输入<strong>您自己（当前管理员）</strong>的登录密码以确认此操作：</p>
+          <p className="text-sm">请输入<strong>{verifierLabel}</strong>的登录密码以确认此操作：</p>
           <Input
             type="password"
             value={pwd}
             autoFocus
-            placeholder="当前管理员密码"
+            placeholder="登录密码"
             onChange={(e) => setPwd(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter' && pwd) onConfirm(pwd); }}
           />

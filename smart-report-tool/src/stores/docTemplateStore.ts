@@ -8,7 +8,7 @@ interface DocTemplateState {
   fetchDocTemplates: () => Promise<void>;
   updateDocTemplate: (id: string, updates: Partial<DocTemplate>) => Promise<void>;
   updateDocTemplateWithFile: (id: string, formData: FormData) => Promise<void>;
-  removeDocTemplate: (id: string) => Promise<void>;
+  removeDocTemplate: (id: string, adminPassword?: string) => Promise<void>;
 }
 
 export const useDocTemplateStore = create<DocTemplateState>((set, get) => ({
@@ -38,8 +38,8 @@ export const useDocTemplateStore = create<DocTemplateState>((set, get) => ({
     await get().fetchDocTemplates();
   },
 
-  removeDocTemplate: async (id: string) => {
-    await apiDelete(`/templates/${id}`);
+  removeDocTemplate: async (id: string, adminPassword?: string) => {
+    await apiDelete(`/templates/${id}`, undefined, adminPassword ? { adminPassword } : undefined);
     await get().fetchDocTemplates();
   },
 }));

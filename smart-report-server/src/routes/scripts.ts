@@ -10,6 +10,7 @@
 import { Router, Request, Response } from 'express';
 import { scriptService } from '../services/scriptService';
 import { authenticate, authorize } from '../middleware/auth';
+import { requirePasswordConfirm, auditSensitiveSuccess } from '../middleware/sensitiveGuard';
 import { uploadScriptFiles } from '../middleware/upload';
 import { settingsService } from '../services/settingsService';
 import { fileManager } from '../utils/file';
@@ -48,8 +49,8 @@ export class ScriptRoutes {
     // uploadScriptFiles 对非 multipart 请求透明传递，不影响 JSON 更新
     this.router.put('/:id', authenticate, uploadScriptFiles, this.updateScript.bind(this));
 
-    // 删除脚本（需要认证）
-    this.router.delete('/:id', authenticate, this.deleteScript.bind(this));
+    // 删除脚本（需要认证 + 本人密码二次验证，操作写入安全审计日志）
+    this.router.delete('/:id', authenticate, requirePasswordConfirm('script.delete', '删除脚本'), this.deleteScript.bind(this));
 
     // 清空多文件模式下的脚本文件（需要认证）
     this.router.delete('/:id/files', authenticate, this.clearScriptFiles.bind(this));
@@ -472,7 +473,16 @@ export class ScriptRoutes {
     try {
       const id = req.params.id as string;
 
+      // 先取脚本信息用于审计记录（删除后就拿不到了）
+      let scriptName = id;
+      try {
+        const script = await scriptService.getScript(id);
+        scriptName = script.name || id;
+      } catch { /* 脚本不存在时由 deleteScript 抛错 */ }
+
       await scriptService.deleteScript(id);
+
+      auditSensitiveSuccess(req, 'script.delete', `已删除脚本「${scriptName}」`, scriptName);
 
       const response: ApiResponse<{ success: boolean }> = {
         code: 200,
