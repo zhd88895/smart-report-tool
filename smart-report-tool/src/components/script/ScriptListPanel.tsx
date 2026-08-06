@@ -320,27 +320,25 @@ export function ScriptListPanel({ onEditScript }: ScriptListPanelProps) {
                       <Badge variant="outline">{LOG_CATEGORY_LABELS[sel.category]}</Badge>
                       {sel.region && sel.region !== '全部' && <Badge variant="outline" className="text-xs">{sel.region}</Badge>}
                       {renderDepsBadge(sel)}
+                      {/* 一键下载巡检工具（有工具文件时显示，阻止冒泡避免触发卡片编辑） */}
+                      {sel.toolFiles.length > 0 && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-6 px-2 text-xs"
+                          disabled={downloadingToolsId === sel.id}
+                          onClick={(e) => handleDownloadTools(e, sel)}
+                        >
+                          {downloadingToolsId === sel.id ? (
+                            <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                          ) : (
+                            <Download className="h-3 w-3 mr-1" />
+                          )}
+                          {downloadingToolsId === sel.id ? '打包中...' : `巡检工具（${sel.toolFiles.length}）`}
+                        </Button>
+                      )}
                     </div>
                   </div>
-                  {/* 一键下载巡检工具（有工具文件时显示，阻止冒泡避免触发卡片编辑） */}
-                  {sel.toolFiles.length > 0 && (
-                    <div className="flex justify-end mt-1.5">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="h-7 text-xs"
-                        disabled={downloadingToolsId === sel.id}
-                        onClick={(e) => handleDownloadTools(e, sel)}
-                      >
-                        {downloadingToolsId === sel.id ? (
-                          <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-                        ) : (
-                          <Download className="h-3 w-3 mr-1" />
-                        )}
-                        {downloadingToolsId === sel.id ? '打包下载中...' : `一键下载巡检工具（${sel.toolFiles.length}）`}
-                      </Button>
-                    </div>
-                  )}
                   {/* 描述行（可选，一行截断） */}
                   {sel.description && (
                     <p className="text-sm text-muted-foreground truncate mt-1">{sel.description}</p>
