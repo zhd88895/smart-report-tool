@@ -258,69 +258,67 @@ export default function UsersPage() {
         <TabsContent value="all" className="mt-4">
           <Card>
             <CardHeader className="pt-4 pb-2">
-              <div className="flex items-center justify-between gap-2">
-                <CardTitle className="text-base">用户列表</CardTitle>
-                <div id="users-all-toolbar" className="shrink-0" />
+              <div className="flex items-center gap-3 flex-wrap">
+                <CardTitle className="text-base shrink-0">用户列表</CardTitle>
+                {/* 搜索框 + 清除筛选：上移与标题同行 */}
+                <div className="relative flex-1 min-w-[200px] max-w-[400px]">
+                  <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    placeholder="搜索用户名或显示名称..."
+                    value={userSearch}
+                    onChange={(e) => setUserSearch(e.target.value)}
+                    className="pl-9 h-9"
+                  />
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-9 text-xs shrink-0"
+                  disabled={!userSearch && roleFilter === 'all' && statusFilter === 'all' && regionFilter === 'all'}
+                  onClick={() => { setUserSearch(''); setRoleFilter('all'); setStatusFilter('all'); setRegionFilter('all'); }}
+                >
+                  <XIcon className="h-3.5 w-3.5 mr-1" />清除筛选
+                </Button>
               </div>
             </CardHeader>
             <CardContent className="space-y-4">
-              {/* 搜索 + 筛选 */}
-              <div className="space-y-3">
-                <div className="flex gap-3">
-                  <div className="relative flex-1">
-                    <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                    <Input
-                      placeholder="搜索用户名或显示名称..."
-                      value={userSearch}
-                      onChange={(e) => setUserSearch(e.target.value)}
-                      className="pl-9"
-                    />
-                  </div>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-10 text-xs shrink-0"
-                    disabled={!userSearch && roleFilter === 'all' && statusFilter === 'all' && regionFilter === 'all'}
-                    onClick={() => { setUserSearch(''); setRoleFilter('all'); setStatusFilter('all'); setRegionFilter('all'); }}
-                  >
-                    <XIcon className="h-3.5 w-3.5 mr-1" />清除筛选
-                  </Button>
-                </div>
-                <div className="flex gap-3 flex-wrap items-center">
-                  <Select value={roleFilter} onValueChange={setRoleFilter}>
-                    <SelectTrigger className="w-[130px] h-9">
-                      <SelectValue placeholder="全部角色" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">全部角色</SelectItem>
-                      <SelectItem value="admin">{ROLE_LABELS.admin}</SelectItem>
-                      <SelectItem value="senior">{ROLE_LABELS.senior}</SelectItem>
-                      <SelectItem value="member">{ROLE_LABELS.member}</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <Select value={statusFilter} onValueChange={setStatusFilter}>
-                    <SelectTrigger className="w-[130px] h-9">
-                      <SelectValue placeholder="全部状态" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">全部状态</SelectItem>
-                      <SelectItem value="active">已激活</SelectItem>
-                      <SelectItem value="pending">待审核</SelectItem>
-                      <SelectItem value="rejected">已拒绝</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <Select value={regionFilter} onValueChange={setRegionFilter}>
-                    <SelectTrigger className="w-[130px] h-9">
-                      <SelectValue placeholder="全部区域" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">全部区域</SelectItem>
-                      {REGION_LIST.filter((r) => r !== '全部').map((r) => (
-                        <SelectItem key={r} value={r}>{r}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
+              {/* 筛选项 + 列设置（同行，列设置靠右） */}
+              <div className="flex gap-3 flex-wrap items-center">
+                <Select value={roleFilter} onValueChange={setRoleFilter}>
+                  <SelectTrigger className="w-[130px] h-9">
+                    <SelectValue placeholder="全部角色" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">全部角色</SelectItem>
+                    <SelectItem value="admin">{ROLE_LABELS.admin}</SelectItem>
+                    <SelectItem value="senior">{ROLE_LABELS.senior}</SelectItem>
+                    <SelectItem value="member">{ROLE_LABELS.member}</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Select value={statusFilter} onValueChange={setStatusFilter}>
+                  <SelectTrigger className="w-[130px] h-9">
+                    <SelectValue placeholder="全部状态" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">全部状态</SelectItem>
+                    <SelectItem value="active">已激活</SelectItem>
+                    <SelectItem value="pending">待审核</SelectItem>
+                    <SelectItem value="rejected">已拒绝</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Select value={regionFilter} onValueChange={setRegionFilter}>
+                  <SelectTrigger className="w-[130px] h-9">
+                    <SelectValue placeholder="全部区域" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">全部区域</SelectItem>
+                    {REGION_LIST.filter((r) => r !== '全部').map((r) => (
+                      <SelectItem key={r} value={r}>{r}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {/* 「列设置」按钮的外部容器：DataTable 通过 Portal 渲染到这里，靠右对齐 */}
+                <div id="users-all-toolbar" className="ml-auto shrink-0" />
               </div>
               <DataTable columns={allColumns} data={filteredUsers} keyExtractor={(item) => item.id} tableId="users-all" tableClassName="text-[15px]" toolbarContainerId="users-all-toolbar" />
             </CardContent>
