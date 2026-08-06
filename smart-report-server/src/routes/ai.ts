@@ -10,12 +10,6 @@
 import { Router, Request, Response } from 'express';
 import multer from 'multer';
 import { readFile } from 'fs/promises';
-import { writeFile, unlink } from 'fs/promises';
-import { existsSync, mkdirSync } from 'fs';
-import { execSync, execFile } from 'child_process';
-import { promisify } from 'util';
-import { randomUUID } from 'crypto';
-import path from 'path';
 import { authenticate } from '../middleware/auth';
 import { ApiResponse, safeErrorMessage } from '../types';
 import { callUserAI, callUserAIStream, AIMessage } from '../services/aiProviderService';
@@ -24,16 +18,16 @@ import { isArchiveFile, extractEntries, smartSelect } from '../services/archiveA
 import { runToolLoop, runToolLoopStream } from '../services/aiTools/registry';
 import { executeRunScript, executeWriteScript } from '../services/aiTools/confirmTools';
 import { aiToolConfirmRepository } from '../db/repositories/aiToolConfirmRepository';
+import { analysisTaskRepository } from '../db/repositories/analysisTaskRepository';
+import { analysisTaskService } from '../services/analysisTaskService';
 import { userAIConfigService } from '../services/userAIConfigService';
 import { getPrompt, CATEGORY_KEYS } from '../services/aiPrompts';
 import { settingsService } from '../services/settingsService';
 import { getLogger } from '../utils/logger';
-import { decodeTextBuffer } from '../utils/textEncoding';
+import { buildKnowledgeContext } from '../utils/knowledgeExcerpt';
+import { readAndConvertFile } from '../utils/fileTextConvert';
 
 const log = getLogger('AIRoutes', 'core');
-
-/** Promise 化的 execFile */
-const execFileAsync = promisify(execFile);
 
 function buildSystemPrompt(): string {
   const now = new Date();
@@ -58,93 +52,8 @@ name 与完整 mainPy 源码；run_script 必须有 scriptId），并在调用�
 }
 
 // ═══════════════════════════════════════════════════════
-//  知识库上下文：按日志关键词相关性节选
+//  知识库上下文构建已抽取至 utils/knowledgeExcerpt.ts（与任务队列服务共用）
 // ═══════════════════════════════════════════════════════
-
-/** 每个知识库文件注入提示词的最大字符数（大手册只节选相关章节） */
-const KB_PER_FILE_BUDGET = 15000;
-/** 关键词命中处向后扩展的上下文行数 */
-const KB_WINDOW_LINES = 25;
-
-/** 过于泛化的词不参与匹配（避免整篇手册都算"相关"） */
-const KB_STOP_WORDS = new Set([
-  'error', 'fail', 'failed', 'failing', 'failure', 'fault', 'warning', 'critical',
-  'fatal', 'alert', 'level', 'event', 'this', 'that', 'with', 'from', 'the',
-  'reporting', 'specified', 'detected', 'status', 'system', 'log',
-]);
-
-/**
- * 从日志内容 + 文件名提取匹配关键词：
- * - 文件名拆解（HP RX7640.log → hp、rx7640）
- * - 告警码（CPU_FAN_FAIL 等全大写词）及其拆分词（cpu、fan）
- * - 故障关键行里的实义词
- */
-function extractLogKeywords(logContent: string, fileName: string): string[] {
-  const kws = new Set<string>();
-  for (const w of fileName.split(/[^A-Za-z0-9]+/)) {
-    if (w.length >= 3) kws.add(w.toLowerCase());
-  }
-  for (const m of logContent.matchAll(/\b[A-Z][A-Z0-9_]{3,}\b/g)) {
-    kws.add(m[0].toLowerCase());
-    for (const part of m[0].toLowerCase().split('_')) {
-      if (part.length >= 3) kws.add(part);
-    }
-  }
-  for (const line of logContent.split('\n')) {
-    if (/error|fail|fault|critical|fatal|warning/i.test(line)) {
-      for (const w of line.split(/[^A-Za-z0-9]+/)) {
-        if (w.length >= 4) kws.add(w.toLowerCase());
-      }
-    }
-  }
-  return [...kws].filter((k) => !KB_STOP_WORDS.has(k)).slice(0, 60);
-}
-
-/**
- * 按关键词相关性从知识库文件内容中节选章节：
- * 命中行按命中数排序取 Top，向前 3 行 / 向后 KB_WINDOW_LINES 行扩窗，
- * 相邻窗口合并，总量不超过预算；无命中时回退为头部截取。
- */
-function selectRelevantExcerpt(
-  content: string,
-  keywords: string[],
-  budget: number
-): { text: string; relevanceSelected: boolean } {
-  if (content.length <= budget) return { text: content, relevanceSelected: false };
-  const lines = content.split('\n');
-  const hits: Array<[number, number]> = [];
-  lines.forEach((line, i) => {
-    const low = line.toLowerCase();
-    let score = 0;
-    for (const kw of keywords) if (low.includes(kw)) score++;
-    if (score > 0) hits.push([i, score]);
-  });
-  if (hits.length === 0) {
-    return { text: content.slice(0, budget), relevanceSelected: false };
-  }
-  const topLines = hits
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 40)
-    .map((e) => e[0])
-    .sort((a, b) => a - b);
-  // 合并相邻/重叠窗口
-  const windows: Array<[number, number]> = [];
-  for (const i of topLines) {
-    const start = Math.max(0, i - 3);
-    const end = Math.min(lines.length, i + KB_WINDOW_LINES);
-    const last = windows[windows.length - 1];
-    if (last && start <= last[1] + 5) last[1] = Math.max(last[1], end);
-    else windows.push([start, end]);
-  }
-  let text = '';
-  for (const [s, e] of windows) {
-    const chunk = lines.slice(s, e).join('\n');
-    if (text.length + chunk.length > budget) break;
-    text += (text ? '\n\n……（另一相关章节节选）……\n\n' : '') + chunk;
-  }
-  return { text, relevanceSelected: true };
-}
-
 
 export class AIRoutes {
   private router: Router;
@@ -170,6 +79,18 @@ export class AIRoutes {
       const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: limitMB * 1024 * 1024 } });
       upload.single('file')(req, res, next);
     }, this.analyzeFile.bind(this));
+
+    // 分析任务队列（服务端集中排队，刷新/断线可恢复）
+    this.router.post('/analysis-tasks', authenticate, (req, res, next) => {
+      const limitMB = settingsService.getNumber('storage.uploadLimit', 50);
+      const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: limitMB * 1024 * 1024 } });
+      upload.single('file')(req, res, next);
+    }, this.createAnalysisTask.bind(this));
+    this.router.get('/analysis-tasks', authenticate, this.listAnalysisTasks.bind(this));
+    this.router.get('/analysis-tasks/:id', authenticate, this.getAnalysisTask.bind(this));
+    this.router.get('/analysis-tasks/:id/stream', authenticate, this.streamAnalysisTask.bind(this));
+    this.router.post('/analysis-tasks/:id/cancel', authenticate, this.cancelAnalysisTask.bind(this));
+    this.router.delete('/analysis-tasks/:id', authenticate, this.deleteAnalysisTask.bind(this));
   }
 
   /** 非流式聊天：按当前登录用户的数据库配置统一调用；enableTools 时走工具循环 */
@@ -521,26 +442,9 @@ export class AIRoutes {
           log.info(`支持包 Agentic 分析: ${entries.length} 个文件, selected=${summary.selected}, skippedBudget=${summary.skippedBudget}, textFiles=${summary.textFiles}`);
 
           // 构建知识库上下文（用文件路径做关键词提取）
-          let agentKnowledge = '';
-          if (knowledgeFileIds.length > 0) {
-            const { knowledgeBaseRepository } = await import('../db/repositories/knowledgeBaseRepository');
-            const kbFiles = await knowledgeBaseRepository.findFilesByIds(knowledgeFileIds);
-            if (kbFiles.length > 0) {
-              const pathText = entries.map((e: any) => e.path).join('\n');
-              const keywords = extractLogKeywords(pathText, fileName);
-              agentKnowledge = '\n\n## 知识库参考信息\n\n以下为用户从知识库中选取的参考文件（大型文档已按日志中的故障关键词自动节选相关章节）。分析时请主动将日志中的故障现象与参考文件中的对应章节关联，若找到对应的处理/更换/排查流程，请引用该章节给出完整、可操作的解决方法：\n\n';
-              for (const kf of kbFiles) {
-                const full = kf.content || '';
-                const { text, relevanceSelected } = selectRelevantExcerpt(full, keywords, KB_PER_FILE_BUDGET);
-                const note = relevanceSelected
-                  ? '（已按日志关键词节选相关章节）'
-                  : full.length > KB_PER_FILE_BUDGET
-                    ? '（内容较长，已截取开头部分）'
-                    : '';
-                agentKnowledge += `### ${kf.title} (${kf.file_name})${note}\n\n\`\`\`plaintext\n${text}\n\`\`\`\n\n---\n\n`;
-              }
-            }
-          }
+          const agentKnowledge = await buildKnowledgeContext(
+            knowledgeFileIds, entries.map((e: any) => e.path).join('\n'), fileName
+          );
 
           // SSE 头
           res.setHeader('Content-Type', 'text/event-stream');
@@ -599,25 +503,7 @@ export class AIRoutes {
 
       // 构建知识库上下文：大文件按日志关键词节选相关章节（而非只截头部），
       // 让 AI 能基于手册中的对应章节给出完整的故障处理方法
-      let knowledgeContext = '';
-      if (knowledgeFileIds.length > 0) {
-        const { knowledgeBaseRepository } = await import('../db/repositories/knowledgeBaseRepository');
-        const kbFiles = await knowledgeBaseRepository.findFilesByIds(knowledgeFileIds);
-        if (kbFiles.length > 0) {
-          const keywords = extractLogKeywords(content, fileName);
-          knowledgeContext = '\n\n## 知识库参考信息\n\n以下为用户从知识库中选取的参考文件（大型文档已按日志中的故障关键词自动节选相关章节）。分析时请主动将日志中的故障现象与参考文件中的对应章节关联，若找到对应的处理/更换/排查流程，请引用该章节给出完整、可操作的解决方法：\n\n';
-          for (const kf of kbFiles) {
-            const full = kf.content || '';
-            const { text, relevanceSelected } = selectRelevantExcerpt(full, keywords, KB_PER_FILE_BUDGET);
-            const note = relevanceSelected
-              ? '（已按日志关键词节选相关章节）'
-              : full.length > KB_PER_FILE_BUDGET
-                ? '（内容较长，已截取开头部分）'
-                : '';
-            knowledgeContext += `### ${kf.title} (${kf.file_name})${note}\n\n\`\`\`plaintext\n${text}\n\`\`\`\n\n---\n\n`;
-          }
-        }
-      }
+      const knowledgeContext = await buildKnowledgeContext(knowledgeFileIds, content, fileName);
 
       let prompt = getPrompt(category, content + knowledgeContext, customPrompt, supplements);
 
@@ -671,183 +557,193 @@ export class AIRoutes {
       }
     }
   }
-}
 
-/** 读取文件内容，自动探测编码（UTF-8 / UTF-16 / GBK，详见 utils/textEncoding） */
-async function readFileContent(buffer: Buffer): Promise<string> {
-  return decodeTextBuffer(buffer);
-}
+  // ═══════════════════════════════════════════════════════
+  //  分析任务队列（服务端集中排队，刷新/断线可恢复）
+  // ═══════════════════════════════════════════════════════
 
-/** 需要 CLI 转换的非纯文本文件扩展名 */
-const CONVERTIBLE_EXTS = new Set(['.xlsx', '.xls', '.zip', '.tar', '.gz', '.tgz']);
+  /** 创建分析任务（multipart）：文件入去重存储 → 落库 → 排队调度 */
+  private async createAnalysisTask(req: Request, res: Response): Promise<void> {
+    try {
+      const file = req.file;
+      const dedupHash = (((req.body as any)?.dedupHash as string) || '').toLowerCase();
+      const category = ((req.body as any)?.category as string) || 'other';
+      const customPrompt = ((req.body as any)?.customPrompt as string) || '';
+      const modelId = ((req.body as any)?.modelId as string) || null;
+      const modelName = (((req.body as any)?.modelName as string) || '').slice(0, 200);
+      const author = (((req.body as any)?.author as string) || '').slice(0, 100);
+      const supplementsStr = (req.body as any)?.supplements as string;
+      const supplements = supplementsStr ? JSON.parse(supplementsStr) : [];
+      const knowledgeFileIdsStr = (req.body as any)?.knowledgeFileIds as string;
+      const knowledgeFileIds: string[] = knowledgeFileIdsStr ? JSON.parse(knowledgeFileIdsStr) : [];
+      const userHintRaw = (req.body as any)?.userHint;
+      const userHint = typeof userHintRaw === 'string' && userHintRaw.trim()
+        ? userHintRaw.trim().slice(0, 2000)
+        : '';
 
-/** 确定文件是否需要 CLI 转换 */
-function needsConversion(filename: string): boolean {
-  const ext = path.extname(filename).toLowerCase();
-  if (CONVERTIBLE_EXTS.has(ext)) return true;
-  // .tar.gz / .tgz 等复合扩展名
-  const lower = filename.toLowerCase();
-  if (lower.endsWith('.tar.gz') || lower.endsWith('.tgz') || lower.endsWith('.tar.bz2') || lower.endsWith('.tar.xz')) return true;
-  return false;
-}
+      if (!CATEGORY_KEYS.includes(category)) {
+        res.status(400).json({ code: 400, data: null, message: '无效的日志类别' } satisfies ApiResponse<null>);
+        return;
+      }
 
-/** 读取文件内容：纯文本用编码检测，非纯文本通过 CLI 工具转换 */
-async function readAndConvertFile(buffer: Buffer, filename: string): Promise<string> {
-  if (needsConversion(filename)) {
-    return convertWithCLI(buffer, filename);
-  }
-  return readFileContent(buffer);
-}
+      // 文件实体入去重存储：秒传引用或新上传 buffer
+      let fileHash: string;
+      let fileName: string;
+      if (dedupHash) {
+        if (!/^[a-f0-9]{64}$/.test(dedupHash)) {
+          res.status(400).json({ code: 400, data: null, message: '无效的秒传引用' } satisfies ApiResponse<null>);
+          return;
+        }
+        const entry = await fileDedupService.lookup(dedupHash);
+        if (!entry) {
+          res.status(400).json({ code: 400, data: null, message: '文件已过期，请重新上传' } satisfies ApiResponse<null>);
+          return;
+        }
+        await fileDedupService.touch(dedupHash);
+        fileHash = dedupHash;
+        fileName = entry.fileName;
+      } else {
+        if (!file) {
+          res.status(400).json({ code: 400, data: null, message: '请上传巡检日志文件' } satisfies ApiResponse<null>);
+          return;
+        }
+        const stored = await fileDedupService.registerBuffer(file.buffer, file.originalname, req.user!.userId);
+        fileHash = stored.hash;
+        fileName = file.originalname;
+      }
 
-/**
- * 通过 Python CLI 脚本将非纯文本文件转换为文本
- *
- * 修复要点：
- * 1. 使用 promisify(execFile) 真正等待 Python 进程结束
- * 2. 读取输出文件前检查文件是否存在
- * 3. 捕获 stderr 用于调试
- * 4. 校验文件大小和扩展名
- * 5. 无论成功失败都清理临时文件
- */
-async function convertWithCLI(buffer: Buffer, filename: string): Promise<string> {
-  const lowerName = filename.toLowerCase();
-  const ext = path.extname(filename).toLowerCase();
+      const task = await analysisTaskRepository.create({
+        userId: req.user!.userId,
+        fileName, fileHash, category, customPrompt, supplements,
+        knowledgeFileIds, modelId, modelName, author, userHint,
+      });
+      await analysisTaskService.enqueue(task.id);
 
-  // 1. 输入校验
-  if (!buffer || buffer.length === 0) {
-    return '[文件转换失败] 文件内容为空。';
-  }
-  if (buffer.length > 10 * 1024 * 1024) {
-    return '[文件转换失败] 文件大小超过 10MB 限制。';
-  }
-  if (!needsConversion(filename)) {
-    return `[文件转换失败] 不支持的文件格式: ${ext || '未知'}。`;
-  }
-
-  // 2. 准备临时目录（使用项目 data/temp 避免系统临时目录权限问题）
-  const tmpDir = path.resolve(process.cwd(), 'data', 'temp', 'file-convert');
-  if (!existsSync(tmpDir)) mkdirSync(tmpDir, { recursive: true });
-
-  // 使用安全的临时文件名（避免原始文件名中的特殊字符）
-  const jobId = randomUUID();
-  const safeInputName = `${jobId}_input${ext}`;
-  const safeOutputName = `${jobId}_output.txt`;
-  const tmpInput = path.join(tmpDir, safeInputName);
-  const tmpOutput = path.join(tmpDir, safeOutputName);
-
-  log.info(`CLI 转换开始: ${filename}, 大小: ${(buffer.length / 1024).toFixed(1)} KB, 任务ID: ${jobId}`);
-
-  try {
-    // 3. 写入临时输入文件
-    await writeFile(tmpInput, buffer);
-    log.debug(`临时输入文件已写入: ${tmpInput}`);
-
-    // 4. 找到嵌入式 Python
-    const pythonPath = findEmbeddedPython();
-    if (!pythonPath) {
-      return `[文件转换失败] 未找到可用的 Python 环境，无法解析 ${ext} 文件。
-
-原始文件类型: ${ext}
-文件大小: ${(buffer.length / 1024).toFixed(1)} KB
-
-请尝试将文件导出为 .txt / .csv / .log 等纯文本格式后再上传。`;
+      // 告知排队位次（全局队列中的排队任务数）
+      const queued = (await analysisTaskRepository.findOldestQueued());
+      const isRunning = analysisTaskService.isRunning(task.id);
+      res.status(200).json({
+        code: 200,
+        data: { task, queuedAhead: !isRunning && queued && queued.id !== task.id ? 1 : 0 },
+        message: 'success',
+      } satisfies ApiResponse<any>);
+    } catch (error: any) {
+      log.error(`创建分析任务失败: ${safeErrorMessage(error)}`);
+      res.status(500).json({ code: 500, data: null, message: safeErrorMessage(error) } satisfies ApiResponse<null>);
     }
-
-    // 5. 找到转换脚本
-    const scriptPath = findConverterScript();
-    if (!scriptPath) {
-      return `[文件转换失败] 未找到文件转换脚本。请检查 scripts/file_converter.py 是否存在。`;
-    }
-
-    // 6. 执行转换（真正等待子进程结束）
-    const { stdout, stderr } = await execFileAsync(pythonPath, [scriptPath, tmpInput, tmpOutput], {
-      timeout: 30000,
-      maxBuffer: 10 * 1024 * 1024,
-      windowsHide: true,
-    });
-
-    if (stderr) {
-      log.warn(`CLI 转换 stderr: ${filename}: ${stderr.slice(0, 500)}`);
-    }
-
-    // 7. 检查输出文件是否存在
-    if (!existsSync(tmpOutput)) {
-      log.error(`CLI 转换后输出文件不存在: ${tmpOutput}`);
-      return `[文件转换失败] Python 转换后未生成输出文件。
-
-文件类型: ${ext}
-可能原因: 转换脚本异常或输出路径不可写
-
-建议：请将文件导出为 .txt / .csv / .log 等纯文本格式后再上传。`;
-    }
-
-    // 8. 读取输出
-    const output = await readFile(tmpOutput, 'utf-8');
-
-    if (!output || output.trim().length === 0) {
-      return `[文件转换完成] 文件已转换，但内容为空。
-
-文件类型: ${ext}
-可能原因: Excel 工作表为空，或压缩包中无文本文件。`;
-    }
-
-    const preview = output.slice(0, 300).replace(/\s+/g, ' ');
-    log.info(`CLI 转换完成: ${filename} (${(buffer.length / 1024).toFixed(1)} KB → ${(output.length / 1024).toFixed(1)} KB 文本) 任务ID: ${jobId}\n预览: ${preview}...`);
-
-    return output;
-  } catch (err: any) {
-    log.warn(`CLI 转换失败: ${filename}: ${err.message || err}`);
-    if (err.stderr) {
-      log.warn(`CLI 转换失败 stderr: ${err.stderr.slice(0, 500)}`);
-    }
-
-    // 区分错误类型，给出更友好的提示
-    let reason = err.message || '未知错误';
-    if (err.killed && err.signal === 'SIGTERM') {
-      reason = '转换超时（超过 30 秒）';
-    } else if (err.code === 'ENOENT') {
-      reason = '转换输出文件未生成（Python 进程可能异常退出）';
-    }
-
-    return `[文件转换失败] 无法解析 "${filename}"。
-
-文件类型: ${ext}
-原因: ${reason}
-
-建议：请将文件导出为 .txt / .csv / .log 等纯文本格式后再上传。`;
-  } finally {
-    // 9. 清理临时文件（静默忽略错误）
-    try { await unlink(tmpInput); } catch { /* ignore */ }
-    try { await unlink(tmpOutput); } catch { /* ignore */ }
   }
-}
 
-/** 查找嵌入式 Python 解释器路径 */
-function findEmbeddedPython(): string | null {
-  // 项目内置 embedded Python
-  const candidates = [
-    path.resolve(process.cwd(), 'data', 'python-embedded', 'python.exe'),
-    path.resolve(process.cwd(), 'data', 'python-embedded', 'python'),
-  ];
-  for (const p of candidates) {
-    if (existsSync(p)) return p;
+  /** 当前用户的任务列表（新的在前） */
+  private async listAnalysisTasks(req: Request, res: Response): Promise<void> {
+    try {
+      const tasks = await analysisTaskRepository.listByUser(req.user!.userId);
+      res.status(200).json({ code: 200, data: { tasks }, message: 'success' } satisfies ApiResponse<any>);
+    } catch (error: any) {
+      res.status(500).json({ code: 500, data: null, message: safeErrorMessage(error) } satisfies ApiResponse<null>);
+    }
   }
-  // 降级：尝试系统 Python
-  try {
-    const result = execSync('python3 --version 2>nul || python --version 2>nul || py -3 --version 2>nul', { timeout: 3000 });
-    if (result) return 'python';
-  } catch {}
-  return null;
-}
 
-/** 查找文件转换脚本路径 */
-function findConverterScript(): string | null {
-  const candidates = [
-    path.resolve(process.cwd(), 'scripts', 'file_converter.py'),
-    path.resolve(__dirname, '..', '..', 'scripts', 'file_converter.py'),
-  ];
-  for (const p of candidates) {
-    if (existsSync(p)) return p;
+  /** 任务详情（含终态结果全文） */
+  private async getAnalysisTask(req: Request, res: Response): Promise<void> {
+    try {
+      const task = await analysisTaskRepository.findByIdAndUser(req.params.id as string, req.user!.userId);
+      if (!task) {
+        res.status(404).json({ code: 404, data: null, message: '任务不存在' } satisfies ApiResponse<null>);
+        return;
+      }
+      res.status(200).json({ code: 200, data: { task }, message: 'success' } satisfies ApiResponse<any>);
+    } catch (error: any) {
+      res.status(500).json({ code: 500, data: null, message: safeErrorMessage(error) } satisfies ApiResponse<null>);
+    }
   }
-  return null;
+
+  /**
+   * 任务事件流（SSE，断线重连友好）：
+   * - queued：保持连接，开始执行后推送进度与增量
+   * - running：先补发已累积的输出，再接续实时增量
+   * - done/error/cancelled：直接推送终态结果并结束
+   */
+  private async streamAnalysisTask(req: Request, res: Response): Promise<void> {
+    const taskId = req.params.id as string;
+    const userId = req.user!.userId;
+    try {
+      const task = await analysisTaskRepository.findByIdAndUser(taskId, userId);
+      if (!task) {
+        res.status(404).json({ code: 404, data: null, message: '任务不存在' } satisfies ApiResponse<null>);
+        return;
+      }
+
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Connection', 'keep-alive');
+      res.setHeader('X-Accel-Buffering', 'no');
+      res.flushHeaders();
+      const writeEvent = (payload: unknown): void => {
+        res.write(`data: ${JSON.stringify(payload)}\n\n`);
+      };
+
+      // 终态任务：直接回放结果并结束
+      if (task.status === 'done') {
+        if (task.resultText) writeEvent({ choices: [{ delta: { content: task.resultText } }] });
+        writeEvent({ type: 'task_done', reportId: task.reportId });
+        res.write('data: [DONE]\n\n');
+        res.end();
+        return;
+      }
+      if (task.status === 'error' || task.status === 'cancelled') {
+        writeEvent({ type: 'task_error', message: task.error || '任务已取消' });
+        res.write('data: [DONE]\n\n');
+        res.end();
+        return;
+      }
+
+      // 排队/运行中：订阅实时事件
+      if (task.status === 'queued') {
+        writeEvent({ type: 'pack_progress', message: '排队等待中，前面的任务完成后自动开始...' });
+      }
+      const { runtime, unsubscribe } = analysisTaskService.subscribe(taskId, writeEvent);
+      // 补发已累积的输出与当前进度（运行中重连）
+      if (runtime && runtime.text) writeEvent({ choices: [{ delta: { content: runtime.text } }] });
+      if (runtime && runtime.progress) writeEvent({ type: 'pack_progress', message: runtime.progress });
+      if (runtime?.fallback) writeEvent({ type: 'fallback_notice' });
+
+      req.on('close', () => unsubscribe());
+    } catch (error: any) {
+      log.error(`任务事件流失败: ${safeErrorMessage(error)}`);
+      if (!res.headersSent) {
+        res.status(500).json({ code: 500, data: null, message: safeErrorMessage(error) } satisfies ApiResponse<null>);
+      } else {
+        res.write(`event: error\ndata: ${JSON.stringify({ error: safeErrorMessage(error) })}\n\n`);
+        res.end();
+      }
+    }
+  }
+
+  /** 取消排队中的任务（运行中的不可取消） */
+  private async cancelAnalysisTask(req: Request, res: Response): Promise<void> {
+    try {
+      const ok = await analysisTaskRepository.cancel(req.params.id as string, req.user!.userId);
+      if (!ok) {
+        res.status(409).json({ code: 409, data: null, message: '任务不存在或已在执行，无法取消' } satisfies ApiResponse<null>);
+        return;
+      }
+      res.status(200).json({ code: 200, data: null, message: '任务已取消' } satisfies ApiResponse<null>);
+    } catch (error: any) {
+      res.status(500).json({ code: 500, data: null, message: safeErrorMessage(error) } satisfies ApiResponse<null>);
+    }
+  }
+
+  /** 删除终态任务记录 */
+  private async deleteAnalysisTask(req: Request, res: Response): Promise<void> {
+    try {
+      const ok = await analysisTaskRepository.removeFinished(req.params.id as string, req.user!.userId);
+      if (!ok) {
+        res.status(409).json({ code: 409, data: null, message: '任务不存在或尚未结束，不能删除' } satisfies ApiResponse<null>);
+        return;
+      }
+      res.status(200).json({ code: 200, data: null, message: '任务记录已删除' } satisfies ApiResponse<null>);
+    } catch (error: any) {
+      res.status(500).json({ code: 500, data: null, message: safeErrorMessage(error) } satisfies ApiResponse<null>);
+    }
+  }
 }

@@ -494,6 +494,31 @@ async function createSchema(): Promise<void> {
 
   // 迁移：将历史 AI 报告中存储为 userId 的 author 字段更新为显示名
   await migrateReportAuthorsToDisplayName();
+
+  // 迁移：AI 分析任务队列表（服务端集中排队，刷新页面/断线后可恢复任务状态）
+  await runAsync(`CREATE TABLE IF NOT EXISTS analysis_tasks (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    file_name TEXT NOT NULL,
+    file_hash TEXT NOT NULL,
+    category TEXT NOT NULL,
+    custom_prompt TEXT,
+    supplements TEXT,
+    knowledge_file_ids TEXT,
+    model_id TEXT,
+    model_name TEXT,
+    author TEXT,
+    user_hint TEXT,
+    status TEXT NOT NULL DEFAULT 'queued',
+    result_text TEXT,
+    error TEXT,
+    report_id TEXT,
+    created_at TEXT NOT NULL,
+    started_at TEXT,
+    finished_at TEXT
+  )`);
+  await runAsync(`CREATE INDEX IF NOT EXISTS idx_analysis_tasks_user ON analysis_tasks(user_id, created_at)`);
+  await runAsync(`CREATE INDEX IF NOT EXISTS idx_analysis_tasks_status ON analysis_tasks(status, created_at)`);
 }
 
 /**

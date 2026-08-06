@@ -44,7 +44,7 @@ export function AIAnalysisPanel() {
   const navigate = useNavigate();
   const { resolved, loadResolved, refreshResolved, currentModel } = useAIConfigStore();
   const { user } = useAuthStore();
-  const { tasks, activeTaskId, enqueue, setActiveTask, removeTask } = useAnalysisTaskStore();
+  const { tasks, activeTaskId, enqueue, setActiveTask, removeTask, loadTasks } = useAnalysisTaskStore();
   const [category, setCategory] = useState<string>('host');
   // 输入模式：单文件（默认）⇄ 支持包（压缩包整包分析）
   const [inputMode, setInputMode] = useState<'file' | 'archive'>('file');
@@ -86,6 +86,12 @@ export function AIAnalysisPanel() {
   useEffect(() => {
     if (!resolved) loadResolved();
     else refreshResolved();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // 挂载时从后端恢复任务队列：刷新页面/换页后能看到进行中的任务并接续实时输出
+  useEffect(() => {
+    void loadTasks();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -496,7 +502,7 @@ export function AIAnalysisPanel() {
           <div className="flex gap-2">
             <Button onClick={handleAnalyze} disabled={!selectedFile} className="flex-1 h-10 shadow-sm">
               <Zap className="h-4 w-4 mr-2" />
-              {hasRunningTask ? '加入分析队列' : '开始 AI 分析'}
+              {hasRunningTask || queuedCount > 0 ? '加入分析队列' : '开始 AI 分析'}
             </Button>
           </div>
         </CardContent>

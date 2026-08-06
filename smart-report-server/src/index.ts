@@ -329,6 +329,15 @@ async function start(): Promise<void> {
   // 3. 启动临时上传文件保留清理调度（每 6 小时，天数取 storage.retentionDays）
   startFileCleanupScheduler();
 
+  // 3.1 恢复 AI 分析任务队列：中断的 running 标记为 error，queued 任务恢复调度
+  try {
+    const { analysisTaskService } = await import('./services/analysisTaskService');
+    await analysisTaskService.init();
+    logger.info('分析任务队列已恢复');
+  } catch (err) {
+    logger.warn(`分析任务队列恢复失败（不影响核心功能）: ${err instanceof Error ? err.message : String(err)}`);
+  }
+
   // 3. 清理过期会话（后台执行）
   setTimeout(async () => {
     try {
