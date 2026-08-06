@@ -16,6 +16,7 @@ import { existsSync, mkdirSync } from 'fs';
 import { execSync, execFile } from 'child_process';
 import { promisify } from 'util';
 import { getLogger, generateTraceId } from '../utils/logger';
+import { decodeTextBuffer } from '../utils/textEncoding';
 import { getConfig } from '../config';
 import { ToolResult } from './agentTools';
 
@@ -295,10 +296,11 @@ export class FileOperationService {
 
   /**
    * 读取文件内容
+   * encoding 省略时自动探测编码（UTF-8 / UTF-16 / GBK），避免 GBK 日志送入 AI 变乱码
    */
   async readFile(
     filePath: string,
-    encoding: string = 'utf-8',
+    encoding?: string,
     maxLines: number = 1000,
     startLine: number = 1
   ): Promise<ToolResult> {
@@ -328,11 +330,10 @@ export class FileOperationService {
       const stats = await fs.stat(resolvedFilePath);
       const fileSize = stats.size;
 
-      // 读取文件内容
-      let content = await fs.readFile(resolvedFilePath, encoding as any);
-      
-      // 处理换行符
-      const contentStr = typeof content === 'string' ? content : content.toString('utf-8');
+      // 读取文件内容（未指定编码时自动探测 UTF-8 / UTF-16 / GBK）
+      const contentStr: string = encoding
+        ? await fs.readFile(resolvedFilePath, encoding as BufferEncoding)
+        : decodeTextBuffer(await fs.readFile(resolvedFilePath));
       const lines = contentStr.split('\n');
       const totalLines = lines.length;
 
@@ -357,7 +358,7 @@ export class FileOperationService {
           filePath: resolvedFilePath,
           fileName: path.basename(resolvedFilePath),
           fileSize,
-          encoding,
+          encoding: encoding || 'auto',
           totalLines,
           selectedLines: selectedLines.length,
           startLine,

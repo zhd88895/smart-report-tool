@@ -76,7 +76,7 @@ export class AIAnalysisWithToolsService {
             for (const keyFile of keyFiles.slice(0, 5)) { // 限制读取5个关键文件
               const readResult = await fileOperationService.readFile(
                 keyFile,
-                'utf-8',
+                undefined, // 自动探测编码
                 200 // 限制读取200行
               );
               if (readResult.success && readResult.data) {
@@ -251,7 +251,7 @@ export class AIAnalysisWithToolsService {
    */
   private async extractFileContent(filePath: string): Promise<string> {
     try {
-      const result = await fileOperationService.readFile(filePath, 'utf-8', 1000);
+      const result = await fileOperationService.readFile(filePath, undefined, 1000);
       if (result.success && result.data) {
         return result.data.content;
       }

@@ -32,6 +32,7 @@ import fs from 'fs/promises';
 import { existsSync, mkdirSync } from 'fs';
 import { getConfig } from '../config';
 import { settingsService } from '../services/settingsService';
+import { decodeTextBuffer } from '../utils/textEncoding';
 
 const log = getLogger('AssetSupplementsRoute', 'other');
 
@@ -195,10 +196,10 @@ assetSupplementRoutes.post('/upload', authMiddleware, (req: Request, res: Respon
     const { createHash } = await import('crypto');
     const fileHash = createHash('sha256').update(fileBuffer).digest('hex');
     
-    // 读取文件内容
+    // 读取文件内容（自动探测编码，避免 GBK 文本送入 AI 变乱码）
     let fileContent = '';
     try {
-      fileContent = await fs.readFile(req.file.path, 'utf-8');
+      fileContent = decodeTextBuffer(fileBuffer);
     } catch (error) {
       // 可能是二进制文件，跳过内容读取
       log.warn(`无法读取文件内容: ${req.file.originalname}`);

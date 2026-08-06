@@ -18,6 +18,7 @@ import { ApiResponse } from '../types';
 import { getLogger, generateTraceId } from '../utils/logger';
 import { getConfig } from '../config';
 import { settingsService } from '../services/settingsService';
+import { decodeTextBuffer } from '../utils/textEncoding';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs/promises';
@@ -100,12 +101,12 @@ async function parseFile(filePath: string, ext: string, originalName: string): P
       case '.text':
       case '.md':
       case '.markdown': {
-        const content = await fs.readFile(filePath, 'utf-8');
+        const content = decodeTextBuffer(await fs.readFile(filePath));
         return { content };
       }
       case '.html':
       case '.htm': {
-        const raw = await fs.readFile(filePath, 'utf-8');
+        const raw = decodeTextBuffer(await fs.readFile(filePath));
         // 简易 HTML → 文本：去标签
         const text = raw
           .replace(/<script[\s\S]*?<\/script>/gi, '')

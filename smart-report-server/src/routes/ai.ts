@@ -28,6 +28,7 @@ import { userAIConfigService } from '../services/userAIConfigService';
 import { getPrompt, CATEGORY_KEYS } from '../services/aiPrompts';
 import { settingsService } from '../services/settingsService';
 import { getLogger } from '../utils/logger';
+import { decodeTextBuffer } from '../utils/textEncoding';
 
 const log = getLogger('AIRoutes', 'core');
 
@@ -672,29 +673,9 @@ export class AIRoutes {
   }
 }
 
-/** 读取文件内容，尝试多种编码 */
+/** 读取文件内容，自动探测编码（UTF-8 / UTF-16 / GBK，详见 utils/textEncoding） */
 async function readFileContent(buffer: Buffer): Promise<string> {
-  // 1. UTF-8 BOM
-  if (buffer.length >= 3 && buffer[0] === 0xEF && buffer[1] === 0xBB && buffer[2] === 0xBF) {
-    return buffer.toString('utf-8').replace(/^\uFEFF/, '');
-  }
-  // 2. UTF-16 LE BOM
-  if (buffer.length >= 2 && buffer[0] === 0xFF && buffer[1] === 0xFE) {
-    return buffer.toString('utf16le');
-  }
-  // 3. Try UTF-8 first
-  try {
-    const utf8 = buffer.toString('utf-8');
-    // Quick check: if it has common Chinese chars or looks valid UTF-8
-    if (!utf8.includes('\ufffd') || utf8.length < 100) return utf8;
-  } catch { /* fallback */ }
-  // 4. Fallback to GBK (Chinese Windows log files)
-  try {
-    const iconv = await import('iconv-lite').catch(() => null);
-    if (iconv) return iconv.decode(buffer, 'gbk');
-  } catch { /* fallback */ }
-  // 5. Last resort: UTF-8 with replacement
-  return buffer.toString('utf-8');
+  return decodeTextBuffer(buffer);
 }
 
 /** 需要 CLI 转换的非纯文本文件扩展名 */

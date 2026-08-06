@@ -12,6 +12,7 @@ import { Readable } from 'stream';
 import * as tar from 'tar';
 import AdmZip from 'adm-zip';
 import { getLogger } from '../utils/logger';
+import { decodeTextBuffer } from '../utils/textEncoding';
 import { settingsService } from './settingsService';
 
 const log = getLogger('ArchiveAnalysisService', 'core');
@@ -196,7 +197,8 @@ export async function extractEntries(buffer: Buffer, fileName: string): Promise<
   return raw.map((r) => ({
     path: r.path,
     size: r.size,
-    text: detectText(r.path, r.data) ? r.data.toString('utf-8') : null,
+    // 自动探测编码（UTF-8 / UTF-16 / GBK），避免 GBK 日志送入 AI 变乱码
+    text: detectText(r.path, r.data) ? decodeTextBuffer(r.data) : null,
   }));
 }
 
