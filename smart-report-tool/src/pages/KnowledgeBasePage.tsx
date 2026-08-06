@@ -25,7 +25,7 @@ import {
 import { toast } from 'sonner';
 import {
   FolderPlus, Upload, Search, Trash2, Edit, FileText, FileCode,
-  Archive, RefreshCw, Folder, AlertCircle, Check,
+  Archive, RefreshCw, Folder, AlertCircle, Check, Download,
 } from 'lucide-react';
 import { ConfirmDialog } from '@/components/common/ConfirmDialog';
 import { EmptyState } from '@/components/common/EmptyState';
@@ -195,7 +195,7 @@ export default function KnowledgeBasePage() {
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
     if (!f) return;
-    if (f.size > 20 * 1024 * 1024) { toast.error('文件不能超过20MB'); return; }
+    if (f.size > 200 * 1024 * 1024) { toast.error('文件不能超过200MB'); return; }
     setUploadFile(f);
     if (!uploadTitle) setUploadTitle(f.name.replace(/\.[^.]+$/, ''));
   };
@@ -226,6 +226,16 @@ export default function KnowledgeBasePage() {
   };
 
   const deleteFile = (file: KBFile) => setDeleteFileTarget(file);
+
+  /** 下载知识库原始文件（直接走浏览器流式下载，不把大文件读进内存） */
+  const downloadKbFile = (file: KBFile) => {
+    const a = document.createElement('a');
+    a.href = `/api/knowledge-base/files/${file.id}/download`;
+    a.download = file.file_name || `${file.title}${file.file_ext || ''}`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  };
 
   /** 重新解析失败的文件（后端补装解析库后可一键重试） */
   const [reparsingId, setReparsingId] = useState<string | null>(null);
@@ -422,6 +432,14 @@ export default function KnowledgeBasePage() {
                           )}
                           <Button
                             variant="ghost" size="icon"
+                            className="h-8 w-8"
+                            title="下载文件"
+                            onClick={() => downloadKbFile(file)}
+                          >
+                            <Download className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="ghost" size="icon"
                             className="h-8 w-8 text-destructive hover:text-destructive"
                             title="删除文件"
                             onClick={() => deleteFile(file)}
@@ -494,7 +512,7 @@ export default function KnowledgeBasePage() {
               <Label>选择文件 *</Label>
               <Input type="file" onChange={handleFileSelect}
                 accept=".md,.markdown,.html,.htm,.docx,.doc,.pdf,.txt,.text" />
-              <p className="text-xs text-muted-foreground">支持 MD、HTML、Word、PDF、TXT，最大20MB</p>
+              <p className="text-xs text-muted-foreground">支持 MD、HTML、Word、PDF、TXT，最大200MB</p>
             </div>
             <div className="space-y-2">
               <Label>标题</Label>

@@ -26,6 +26,19 @@ import { randomUUID } from 'crypto';
 const log = getLogger('KnowledgeBaseRoutes', 'other');
 const router = Router();
 
+/**
+ * 修复 multer/busboy 对 multipart 文件名的 latin1 误解码问题
+ * 浏览器按 UTF-8 发送中文文件名，busboy 默认按 latin1 解码会产生乱码（如 H3Cæœ...）
+ * 检测：转回 latin1 字节再按 UTF-8 解码，若无替换字符且含中文则说明原本是乱码，返回修复值
+ */
+function decodeOriginalName(name: string): string {
+  if (!name) return name;
+  // 已含正常中文或不含高位字符，直接返回
+  if (/[一-鿿]/.test(name) || !/[-ÿ]/.test(name)) return name;
+  const decoded = Buffer.from(name, 'latin1').toString('utf8');
+  return decoded.includes('�') ? name : decoded;
+}
+
 // ═══════════════════════════════════════════════════════
 //  文件上传配置
 // ═══════════════════════════════════════════════════════
@@ -277,21 +290,22 @@ router.post('/files/upload', authenticate, (req: Request, res: Response, next: N
     return;
   }
 
-  const ext = path.extname(file.originalname).toLowerCase();
+  const originalName = decodeOriginalName(file.originalname);
+  const ext = path.extname(originalName).toLowerCase();
   const fileType = ext.replace('.', '');
-  const fileTitle = title?.trim() || path.parse(file.originalname).name;
+  const fileTitle = title?.trim() || path.parse(originalName).name;
 
-  log.info(`上传知识库文件: ${file.originalname} (${ext})`, traceId);
+  log.info(`上传知识库文件: ${originalName} (${ext})`, traceId);
 
   try {
     // 解析文件内容
-    const { content, error } = await parseFile(file.path, ext, file.originalname);
+    const { content, error } = await parseFile(file.path, ext, originalName);
     const status = error ? 'error' : 'ready';
 
     const kbFile = await knowledgeBaseRepository.createFile({
       category_id: categoryId || null,
       title: fileTitle,
-      file_name: file.originalname,
+      file_name: originalName,
       file_path: file.path,
       file_size: file.size,
       file_type: fileType,
@@ -383,6 +397,35 @@ router.post('/files/batch', authenticate, async (req: Request, res: Response) =>
     res.json({ code: 200, data: result, message: `获取 ${result.length} 个文件` } as ApiResponse<any>);
   } catch (err: any) {
     res.status(500).json({ code: 500, data: null, message: '批量获取文件失败', error: err.message } as ApiResponse<null>);
+  }
+});
+
+// 下载文件（返回原始文件，保留原文件名）
+router.get('/files/:id/download', authenticate, async (req: Request, res: Response) => {
+  const id = req.params.id as string;
+  try {
+    const file = await knowledgeBaseRepository.findFileById(id);
+    if (!file) {
+      res.status(404).json({ code: 404, data: null, message: '文件不存在' } as ApiResponse<null>);
+      return;
+    }
+    if (!file.file_path || !existsSync(file.file_path)) {
+      res.status(410).json({ code: 410, data: null, message: '原始文件已被清理，无法下载' } as ApiResponse<null>);
+      return;
+    }
+    const downloadName = file.file_name || `${file.title}${file.file_ext || ''}`;
+    const asciiFallback = downloadName.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '_');
+    res.setHeader('Content-Type', 'application/octet-stream');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${asciiFallback}"; filename*=UTF-8''${encodeURIComponent(downloadName)}`
+    );
+    const stat = await fs.stat(file.file_path);
+    res.setHeader('Content-Length', stat.size);
+    const { createReadStream } = await import('fs');
+    createReadStream(file.file_path).pipe(res);
+  } catch (err: any) {
+    res.status(500).json({ code: 500, data: null, message: '下载文件失败', error: err.message } as ApiResponse<null>);
   }
 });
 
