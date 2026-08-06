@@ -68,11 +68,13 @@ export function ConversationRecordsPanel() {
     {
       key: 'messageCount',
       header: '消息数',
+      minWidth: 70,
       render: (item: Conversation) => item.messages.length,
     },
     {
       key: 'tokenUsage',
       header: 'Token 用量（入/出）',
+      minWidth: 110,
       render: (item: Conversation) =>
         item.tokenUsage ? (
           <span className="text-sm tabular-nums" title={`共 ${fmtNum(item.tokenUsage.totalTokens)} tokens / ${item.tokenUsage.calls} 次调用`}>
@@ -82,11 +84,12 @@ export function ConversationRecordsPanel() {
           <span className="text-sm text-muted-foreground">—</span>
         ),
     },
-    { key: 'createdAt', header: '创建时间', render: (item: Conversation) => formatDate(item.createdAt) },
-    { key: 'updatedAt', header: '更新时间', render: (item: Conversation) => formatDate(item.updatedAt) },
+    { key: 'createdAt', header: '创建时间', minWidth: 140, render: (item: Conversation) => formatDate(item.createdAt) },
+    { key: 'updatedAt', header: '更新时间', minWidth: 140, render: (item: Conversation) => formatDate(item.updatedAt) },
     {
       key: 'actions',
       header: '操作',
+      minWidth: 70,
       hideable: false,
       render: (item: Conversation) => (
         <Button

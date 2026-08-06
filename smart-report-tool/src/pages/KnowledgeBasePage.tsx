@@ -332,6 +332,7 @@ export default function KnowledgeBasePage() {
       key: 'file_size',
       header: '大小',
       sortable: true,
+      minWidth: 90,
       sortValue: (file: KBFile) => file.file_size,
       render: (file: KBFile) => <span className="text-sm">{formatFileSize(file.file_size)}</span>,
     },
@@ -339,6 +340,7 @@ export default function KnowledgeBasePage() {
       key: 'created_at',
       header: '上传时间',
       sortable: true,
+      minWidth: 100,
       sortValue: (file: KBFile) => file.created_at,
       render: (file: KBFile) => (
         <span className="text-sm text-muted-foreground">
@@ -350,6 +352,7 @@ export default function KnowledgeBasePage() {
       key: 'actions',
       header: '操作',
       width: '120px',
+      minWidth: 110,
       sortable: false,
       hideable: false,
       render: (file: KBFile) => (

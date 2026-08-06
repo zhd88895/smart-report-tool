@@ -63,6 +63,7 @@ export function ReportListTable({
       key: 'actions',
       header: '操作',
       width: '120px',
+      minWidth: 110,
       hideable: false,
       render: (item: Report) => {
         const isAI = (item.reportSource || 'script') === 'ai';

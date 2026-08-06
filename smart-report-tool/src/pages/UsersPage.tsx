@@ -166,6 +166,7 @@ export default function UsersPage() {
     {
       key: 'role',
       header: '角色',
+      minWidth: 130,
       render: (item: User) => (
         <Select value={item.role} onValueChange={(v) => handleRoleChange(item.id, v as User['role'])}>
           <SelectTrigger className="w-28 h-8 text-xs"><SelectValue /></SelectTrigger>
@@ -180,6 +181,7 @@ export default function UsersPage() {
     {
       key: 'status',
       header: '状态',
+      minWidth: 84,
       render: (item: User) => (
         item.id === currentUser?.id ? (
           <span className="px-2 py-0.5 rounded text-xs bg-primary/10 text-primary font-medium">当前用户</span>
@@ -188,11 +190,12 @@ export default function UsersPage() {
         )
       ),
     },
-    { key: 'region', header: '区域', render: (item: User) => <span className="text-sm">{item.region || '全部'}</span> },
-    { key: 'createdAt', header: '创建时间', render: (item: User) => formatDate(item.createdAt) },
+    { key: 'region', header: '区域', minWidth: 64, render: (item: User) => <span className="text-sm">{item.region || '全部'}</span> },
+    { key: 'createdAt', header: '创建时间', minWidth: 140, render: (item: User) => formatDate(item.createdAt) },
     {
       key: 'actions',
       header: '操作',
+      minWidth: 110,
       hideable: false,
       render: (item: User) => (
         item.id === currentUser?.id ? null : (
@@ -215,10 +218,11 @@ export default function UsersPage() {
   const pendingColumns = [
     { key: 'username', header: '用户名' },
     { key: 'displayName', header: '显示名称' },
-    { key: 'createdAt', header: '申请时间', render: (item: User) => formatDate(item.createdAt) },
+    { key: 'createdAt', header: '申请时间', minWidth: 140, render: (item: User) => formatDate(item.createdAt) },
     {
       key: 'actions',
       header: '操作',
+      minWidth: 76,
       hideable: false,
       render: (item: User) => (
         <div className="flex gap-1">
