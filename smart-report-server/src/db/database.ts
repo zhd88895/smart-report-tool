@@ -429,6 +429,27 @@ async function createSchema(): Promise<void> {
     }
   }
 
+  // 迁移：为 user_ai_usage_logs 表添加调用记录扩展列（状态/错误/耗时/请求摘要/请求体快照）
+  for (const colDef of [
+    "status TEXT DEFAULT 'success'",
+    'error TEXT',
+    'latency_ms INTEGER',
+    'request_summary TEXT',
+    'request_body TEXT',
+  ]) {
+    const colName = colDef.split(' ')[0];
+    if (!(await columnExists('user_ai_usage_logs', colName))) {
+      try {
+        await runAsync(`ALTER TABLE user_ai_usage_logs ADD COLUMN ${colDef}`);
+        logger.info(`数据库迁移: 已添加 user_ai_usage_logs.${colName} 列`);
+      } catch (error: any) {
+        if (!error.message?.includes('duplicate column name')) {
+          logger.warn(`user_ai_usage_logs.${colName} 列添加跳过: ${error.message}`);
+        }
+      }
+    }
+  }
+
   // 迁移：扫描已存在的脚本目录，对每个 is_multi_file=1 的脚本，
   // 将 auxfiles/ 中的 .py 文件迁到 script_extra_files
   await migrateExtraFilesFromAux();

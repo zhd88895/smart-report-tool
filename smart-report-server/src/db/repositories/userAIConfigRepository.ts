@@ -293,13 +293,64 @@ export const userAIConfigRepository = {
     completion_tokens: number;
     /** 所属对话 ID（仅 AI 助手对话场景有值，用于对话级 token 统计） */
     conversation_id?: string;
+    /** 调用状态：success | error | canceled */
+    status?: string;
+    /** 失败原因（status=error 时有值） */
+    error?: string;
+    /** 调用耗时（毫秒） */
+    latency_ms?: number;
+    /** 请求结构摘要（JSON 字符串，供快速排查） */
+    request_summary?: string;
+    /** 完整请求体快照（JSON 字符串，超长会被截断） */
+    request_body?: string;
   }): Promise<void> {
     const id = genId('uail');
     await runAsync(
-      `INSERT INTO user_ai_usage_logs (id, user_id, model_id, feature, prompt_tokens, completion_tokens, conversation_id, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [id, entry.user_id, entry.model_id, entry.feature, entry.prompt_tokens || 0, entry.completion_tokens || 0, entry.conversation_id || null, new Date().toISOString()]
+      `INSERT INTO user_ai_usage_logs (id, user_id, model_id, feature, prompt_tokens, completion_tokens, conversation_id, status, error, latency_ms, request_summary, request_body, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        id, entry.user_id, entry.model_id, entry.feature,
+        entry.prompt_tokens || 0, entry.completion_tokens || 0,
+        entry.conversation_id || null,
+        entry.status || 'success', entry.error || null,
+        entry.latency_ms ?? null, entry.request_summary || null, entry.request_body || null,
+        new Date().toISOString(),
+      ]
     );
+  },
+
+  /** 分页查询调用记录列表（不含 request_body 大字段，按时间倒序，仅当前用户） */
+  async listCallLogs(
+    userId: string,
+    opts: { feature?: string; limit?: number; offset?: number } = {}
+  ): Promise<{ total: number; rows: any[] }> {
+    const limit = Math.min(Math.max(opts.limit || 100, 1), 500);
+    const offset = Math.max(opts.offset || 0, 0);
+    const cond = opts.feature ? 'AND feature = ?' : '';
+    const params: any[] = opts.feature ? [userId, opts.feature] : [userId];
+    const countRow = await getAsync(
+      `SELECT COUNT(*) as c FROM user_ai_usage_logs WHERE user_id = ? ${cond}`,
+      params
+    ) as any;
+    const rows = await allAsync(
+      `SELECT id, model_id, feature, prompt_tokens, completion_tokens, conversation_id,
+              status, error, latency_ms, request_summary, created_at
+       FROM user_ai_usage_logs
+       WHERE user_id = ? ${cond}
+       ORDER BY created_at DESC
+       LIMIT ? OFFSET ?`,
+      [...params, limit, offset]
+    );
+    return { total: countRow?.c || 0, rows: rows as any[] };
+  },
+
+  /** 查询单条调用记录（含 request_body，仅当前用户） */
+  async getCallLog(userId: string, id: string): Promise<any | null> {
+    const row = await getAsync(
+      `SELECT * FROM user_ai_usage_logs WHERE id = ? AND user_id = ?`,
+      [id, userId]
+    );
+    return (row as any) || null;
   },
 
   /** 按对话聚合 token 用量（当前用户），供对话记录页展示 */

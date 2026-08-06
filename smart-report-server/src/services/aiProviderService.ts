@@ -223,6 +223,38 @@ async function throwForErrorResponse(response: Response, context: string): Promi
   throw new Error(`API 返回错误 (${response.status}): ${errorText.slice(0, 300)}`);
 }
 
+/** 请求体快照最大存储长度（超出截断并标注） */
+const REQUEST_BODY_SNAPSHOT_LIMIT = 40000;
+
+/**
+ * 生成请求体检视信息：结构摘要（消息数/每条消息角色与字符数/工具数/参数）
+ * + 完整请求体快照（超长截断）。供调用记录排查异常提交。
+ */
+function buildRequestInspection(body: Record<string, any>): { summary: string; body: string } {
+  const messages = (body.messages || []) as Array<{ role?: string; content?: string; tool_calls?: any }>;
+  const summary = {
+    model: body.model,
+    messageCount: messages.length,
+    totalChars: messages.reduce(
+      (sum, m) => sum + (typeof m.content === 'string' ? m.content.length : 0) + (m.tool_calls ? JSON.stringify(m.tool_calls).length : 0),
+      0
+    ),
+    messages: messages.map((m) => ({
+      role: m.role || 'unknown',
+      chars: (typeof m.content === 'string' ? m.content.length : 0) + (m.tool_calls ? JSON.stringify(m.tool_calls).length : 0),
+    })),
+    toolsCount: Array.isArray(body.tools) ? body.tools.length : 0,
+    temperature: body.temperature,
+    maxOutputTokens: body.max_tokens ?? body.max_completion_tokens,
+    stream: !!body.stream,
+  };
+  let bodyJson = JSON.stringify(body);
+  if (bodyJson.length > REQUEST_BODY_SNAPSHOT_LIMIT) {
+    bodyJson = bodyJson.slice(0, REQUEST_BODY_SNAPSHOT_LIMIT) + `\n...[已截断，原始长度 ${bodyJson.length} 字符]`;
+  }
+  return { summary: JSON.stringify(summary), body: bodyJson };
+}
+
 // ═══════════════════════════════════════════════════════
 //  统一调用入口
 // ═══════════════════════════════════════════════════════
@@ -236,54 +268,84 @@ export async function callUserAI(userId: string, req: UserAIRequest): Promise<Us
   const cfg = await resolveConfig(userId, req.modelId);
   const url = `${cfg.baseUrl}/chat/completions`;
   const body = buildRequestBody(cfg, req, false);
+  const inspection = buildRequestInspection(body);
+  const startedAt = Date.now();
 
   log.info(`⇢ callUserAI feature=${req.feature} model=${cfg.model} provider=${cfg.providerName} fallback=${cfg.fallback} msgCount=${req.messages.length}`);
 
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: buildAuthHeaders(cfg.quirks, cfg.apiKey),
-    body: JSON.stringify(body),
-    signal: AbortSignal.timeout(120000), // 非流式超时 120s
-  });
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: buildAuthHeaders(cfg.quirks, cfg.apiKey),
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(120000), // 非流式超时 120s
+    });
 
-  if (!response.ok) {
-    await throwForErrorResponse(response, 'callUserAI');
-  }
-
-  const data = (await response.json()) as any;
-  const choiceMsg = data.choices?.[0]?.message ?? {};
-  const usage = data.usage
-    ? {
-        promptTokens: data.usage.prompt_tokens ?? 0,
-        completionTokens: data.usage.completion_tokens ?? 0,
-        totalTokens: data.usage.total_tokens ?? 0,
-      }
-    : undefined;
-
-  // 仅数据库配置（非兜底）写用量日志，失败不影响主流程
-  if (cfg.modelDbId && usage) {
-    try {
-      await userAIConfigRepository.logUsage({
-        user_id: userId,
-        model_id: cfg.modelDbId,
-        feature: req.feature,
-        prompt_tokens: usage.promptTokens,
-        completion_tokens: usage.completionTokens,
-        conversation_id: req.conversationId,
-      });
-    } catch (e) {
-      log.warn(`写用量日志失败: ${(e as Error).message}`);
+    if (!response.ok) {
+      await throwForErrorResponse(response, 'callUserAI');
     }
-  }
 
-  return {
-    message: choiceMsg.content ?? '',
-    toolCalls: choiceMsg.tool_calls,
-    usage,
-    model: data.model ?? cfg.model,
-    provider: cfg.providerName,
-    fallback: cfg.fallback,
-  };
+    const data = (await response.json()) as any;
+    const choiceMsg = data.choices?.[0]?.message ?? {};
+    const usage = data.usage
+      ? {
+          promptTokens: data.usage.prompt_tokens ?? 0,
+          completionTokens: data.usage.completion_tokens ?? 0,
+          totalTokens: data.usage.total_tokens ?? 0,
+        }
+      : undefined;
+
+    // 仅数据库配置（非兜底）写用量日志，失败不影响主流程
+    if (cfg.modelDbId && usage) {
+      try {
+        await userAIConfigRepository.logUsage({
+          user_id: userId,
+          model_id: cfg.modelDbId,
+          feature: req.feature,
+          prompt_tokens: usage.promptTokens,
+          completion_tokens: usage.completionTokens,
+          conversation_id: req.conversationId,
+          status: 'success',
+          latency_ms: Date.now() - startedAt,
+          request_summary: inspection.summary,
+          request_body: inspection.body,
+        });
+      } catch (e) {
+        log.warn(`写用量日志失败: ${(e as Error).message}`);
+      }
+    }
+
+    return {
+      message: choiceMsg.content ?? '',
+      toolCalls: choiceMsg.tool_calls,
+      usage,
+      model: data.model ?? cfg.model,
+      provider: cfg.providerName,
+      fallback: cfg.fallback,
+    };
+  } catch (e) {
+    // 请求失败也记一条调用记录（0 token），便于排查异常提交
+    if (cfg.modelDbId) {
+      try {
+        await userAIConfigRepository.logUsage({
+          user_id: userId,
+          model_id: cfg.modelDbId,
+          feature: req.feature,
+          prompt_tokens: 0,
+          completion_tokens: 0,
+          conversation_id: req.conversationId,
+          status: 'error',
+          error: (e as Error).message,
+          latency_ms: Date.now() - startedAt,
+          request_summary: inspection.summary,
+          request_body: inspection.body,
+        });
+      } catch (logErr) {
+        log.warn(`写失败用量日志失败: ${(logErr as Error).message}`);
+      }
+    }
+    throw e;
+  }
 }
 
 /**
@@ -295,7 +357,9 @@ function wrapStreamForUsageLogging(
   upstream: ReadableStream<Uint8Array>,
   onFinish: (
     usage: { promptTokens: number; completionTokens: number } | null,
-    completionChars: number
+    completionChars: number,
+    status: 'success' | 'error' | 'canceled',
+    errorMessage?: string
   ) => void
 ): ReadableStream<Uint8Array> {
   const reader = upstream.getReader();
@@ -305,11 +369,11 @@ function wrapStreamForUsageLogging(
   let completionChars = 0;
   let finished = false;
 
-  const finish = (): void => {
+  const finish = (status: 'success' | 'error' | 'canceled', errorMessage?: string): void => {
     if (finished) return;
     finished = true;
     try {
-      onFinish(usage, completionChars);
+      onFinish(usage, completionChars, status, errorMessage);
     } catch { /* 用量统计失败不影响主流程 */ }
   };
 
@@ -341,7 +405,7 @@ function wrapStreamForUsageLogging(
           buffer += decoder.decode();
           if (buffer.trim()) handleLine(buffer);
           controller.close();
-          finish();
+          finish('success');
           return;
         }
         buffer += decoder.decode(value, { stream: true });
@@ -352,12 +416,12 @@ function wrapStreamForUsageLogging(
         controller.enqueue(value);
       } catch (e) {
         // 上游流中途出错：记日志后把错误透传给路由层
-        finish();
+        finish('error', (e as Error).message);
         controller.error(e);
       }
     },
     async cancel(reason) {
-      finish();
+      finish('canceled', reason ? String(reason) : undefined);
       await reader.cancel(reason).catch(() => {});
     },
   });
@@ -374,7 +438,13 @@ async function logStreamUsage(
   usage: { promptTokens: number; completionTokens: number } | null,
   promptChars: number,
   completionChars: number,
-  conversationId?: string
+  conversationId?: string,
+  extra?: {
+    status?: 'success' | 'error' | 'canceled';
+    error?: string;
+    latencyMs?: number;
+    inspection?: { summary: string; body: string };
+  }
 ): Promise<void> {
   // .env 兜底无数据库模型记录，与非流式 callUserAI 一致不写用量日志
   if (!cfg.modelDbId) return;
@@ -386,6 +456,11 @@ async function logStreamUsage(
       prompt_tokens: usage?.promptTokens ?? Math.ceil(promptChars / 2),
       completion_tokens: usage?.completionTokens ?? Math.ceil(completionChars / 2),
       conversation_id: conversationId,
+      status: extra?.status || 'success',
+      error: extra?.error,
+      latency_ms: extra?.latencyMs,
+      request_summary: extra?.inspection?.summary,
+      request_body: extra?.inspection?.body,
     });
   } catch (e) {
     log.warn(`写流式用量日志失败: ${(e as Error).message}`);
@@ -414,6 +489,8 @@ export async function callUserAIStream(
     (sum, m) => sum + (m.content?.length ?? 0) + (m.tool_calls ? JSON.stringify(m.tool_calls).length : 0),
     0
   );
+  const inspection = buildRequestInspection(body);
+  const startedAt = Date.now();
 
   log.info(`⇢ callUserAIStream feature=${req.feature} model=${cfg.model} provider=${cfg.providerName} fallback=${cfg.fallback} msgCount=${req.messages.length}`);
 
@@ -427,24 +504,45 @@ export async function callUserAIStream(
     });
   } catch (e) {
     // 请求未发出即失败：记一条 0-token 用量日志后原样抛出
-    await logStreamUsage(userId, cfg, req.feature, { promptTokens: 0, completionTokens: 0 }, 0, 0, req.conversationId);
+    await logStreamUsage(userId, cfg, req.feature, { promptTokens: 0, completionTokens: 0 }, 0, 0, req.conversationId, {
+      status: 'error',
+      error: (e as Error).message,
+      latencyMs: Date.now() - startedAt,
+      inspection,
+    });
     throw e;
   }
 
   if (!response.ok) {
     // 上游返回错误：记一条 0-token 用量日志后按统一错误处理抛出
-    await logStreamUsage(userId, cfg, req.feature, { promptTokens: 0, completionTokens: 0 }, 0, 0, req.conversationId);
+    const statusCode = response.status;
+    await logStreamUsage(userId, cfg, req.feature, { promptTokens: 0, completionTokens: 0 }, 0, 0, req.conversationId, {
+      status: 'error',
+      error: `API 返回错误 (${statusCode})`,
+      latencyMs: Date.now() - startedAt,
+      inspection,
+    });
     await throwForErrorResponse(response, 'callUserAIStream');
   }
   if (!response.body) {
-    await logStreamUsage(userId, cfg, req.feature, { promptTokens: 0, completionTokens: 0 }, 0, 0, req.conversationId);
+    await logStreamUsage(userId, cfg, req.feature, { promptTokens: 0, completionTokens: 0 }, 0, 0, req.conversationId, {
+      status: 'error',
+      error: 'API 未返回流式响应',
+      latencyMs: Date.now() - startedAt,
+      inspection,
+    });
     throw new Error('API 未返回流式响应');
   }
 
   const wrappedStream = wrapStreamForUsageLogging(
     response.body as unknown as ReadableStream<Uint8Array>,
-    (usage, completionChars) => {
-      logStreamUsage(userId, cfg, req.feature, usage, promptChars, completionChars, req.conversationId).catch(() => {});
+    (usage, completionChars, status, errorMessage) => {
+      logStreamUsage(userId, cfg, req.feature, usage, promptChars, completionChars, req.conversationId, {
+        status,
+        error: errorMessage,
+        latencyMs: Date.now() - startedAt,
+        inspection,
+      }).catch(() => {});
     }
   );
 

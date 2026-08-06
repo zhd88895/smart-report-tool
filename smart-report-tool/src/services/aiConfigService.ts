@@ -235,6 +235,52 @@ export async function fetchUsage(): Promise<UsageStats> {
   return request<UsageStats>('/ai-config/usage');
 }
 
+// ── 调用记录 ──
+
+/** 调用记录列表行（不含请求体大字段） */
+export interface CallLogRecord {
+  id: string;
+  model_id: string;
+  feature: string;
+  prompt_tokens: number;
+  completion_tokens: number;
+  conversation_id: string | null;
+  status: 'success' | 'error' | 'canceled';
+  error: string | null;
+  latency_ms: number | null;
+  request_summary: string | null;
+  created_at: string;
+}
+
+/** 调用记录详情（含请求体快照） */
+export interface CallLogDetail extends CallLogRecord {
+  request_body: string | null;
+}
+
+export interface CallLogListResult {
+  total: number;
+  rows: CallLogRecord[];
+}
+
+/** 分页查询调用记录（可按功能筛选） */
+export async function fetchCallLogs(params: {
+  feature?: string;
+  limit?: number;
+  offset?: number;
+} = {}): Promise<CallLogListResult> {
+  const qs = new URLSearchParams();
+  if (params.feature) qs.set('feature', params.feature);
+  if (params.limit) qs.set('limit', String(params.limit));
+  if (params.offset) qs.set('offset', String(params.offset));
+  const suffix = qs.toString() ? `?${qs.toString()}` : '';
+  return request<CallLogListResult>(`/ai-config/call-logs${suffix}`);
+}
+
+/** 查询单条调用记录详情（含请求体快照） */
+export async function fetchCallLogDetail(id: string): Promise<CallLogDetail> {
+  return request<CallLogDetail>(`/ai-config/call-logs/${id}`);
+}
+
 const LEGACY_KEY = 'ai-vendor-config';
 
 /**

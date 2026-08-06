@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  Sparkles, Plus, Pencil, Trash2, Star, Download, Server, Zap, Loader2,
+  Sparkles, Plus, Pencil, Trash2, Star, Download, Server, Zap, Loader2, ScrollText,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
@@ -16,6 +16,7 @@ import { ProviderDialog } from '@/components/ai/settings/ProviderDialog';
 import { ModelDialog } from '@/components/ai/settings/ModelDialog';
 import { FetchModelsDialog } from '@/components/ai/settings/FetchModelsDialog';
 import { UsagePanel } from '@/components/ai/settings/UsagePanel';
+import { CallLogsDialog } from '@/components/ai/settings/CallLogsDialog';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import {
@@ -46,6 +47,7 @@ export default function AISettingsPage() {
   const [modelDialogOpen, setModelDialogOpen] = useState(false);
   const [editingModel, setEditingModel] = useState<AIModel | null>(null);
   const [fetchDialogOpen, setFetchDialogOpen] = useState(false);
+  const [callLogsOpen, setCallLogsOpen] = useState(false);
 
   // 删除确认
   const [deleteProviderTarget, setDeleteProviderTarget] = useState<AIProvider | null>(null);
@@ -249,7 +251,12 @@ export default function AISettingsPage() {
         <h2 className="text-2xl font-bold tracking-tight flex items-center gap-2">
           <Sparkles className="h-6 w-6" />AI设置
         </h2>
-        <Badge variant="outline">管理你的 AI 厂商、模型与用量</Badge>
+        <div className="flex items-center gap-2">
+          <Badge variant="outline">管理你的 AI 厂商、模型与用量</Badge>
+          <Button variant="outline" size="sm" onClick={() => setCallLogsOpen(true)}>
+            <ScrollText className="h-4 w-4 mr-1" />调用记录
+          </Button>
+        </div>
       </div>
 
       <div className="flex gap-6 items-start">
@@ -447,6 +454,13 @@ export default function AISettingsPage() {
         onOpenChange={setFetchDialogOpen}
         providerId={selectedProviderId}
         onImported={reloadModelsAndProviders}
+      />
+
+      {/* 弹窗 4：调用记录（请求体查看 + 报告消耗） */}
+      <CallLogsDialog
+        open={callLogsOpen}
+        onOpenChange={setCallLogsOpen}
+        modelNameMap={modelNameMap}
       />
 
       {/* 删除确认 */}

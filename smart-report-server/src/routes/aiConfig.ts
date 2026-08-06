@@ -17,6 +17,7 @@ import { Router, Request, Response } from 'express';
 import { authenticate } from '../middleware/auth';
 import { ApiResponse, safeErrorMessage } from '../types';
 import { userAIConfigService } from '../services/userAIConfigService';
+import { userAIConfigRepository } from '../db/repositories/userAIConfigRepository';
 
 /** 统一 404 响应：资源不存在（含越权访问他人资源） */
 function sendNotFound(res: Response): void {
@@ -92,6 +93,10 @@ export class AIConfigRoutes {
     this.router.get('/resolved', authenticate, this.getResolved.bind(this));
     // 我的用量统计（按模型/功能聚合，近 30 天）
     this.router.get('/usage', authenticate, this.getUsage.bind(this));
+    // 我的调用记录列表（分页，可按功能筛选，不含请求体大字段）
+    this.router.get('/call-logs', authenticate, this.listCallLogs.bind(this));
+    // 单条调用记录详情（含请求体快照）
+    this.router.get('/call-logs/:id', authenticate, this.getCallLogDetail.bind(this));
   }
 
   // ═══════════════════════════════════════════════════════
@@ -430,6 +435,45 @@ export class AIConfigRoutes {
       res.status(200).json(response);
     } catch (error) {
       sendError(res, 500, '获取用量统计失败', error);
+    }
+  }
+
+  /** GET /call-logs — 我的调用记录列表（分页 + 功能筛选，不含请求体大字段） */
+  private async listCallLogs(req: Request, res: Response): Promise<void> {
+    try {
+      const userId = req.user!.userId;
+      const feature = typeof req.query.feature === 'string' && req.query.feature ? req.query.feature : undefined;
+      const limit = req.query.limit ? parseInt(String(req.query.limit), 10) : undefined;
+      const offset = req.query.offset ? parseInt(String(req.query.offset), 10) : undefined;
+      const result = await userAIConfigRepository.listCallLogs(userId, { feature, limit, offset });
+      const response: ApiResponse<typeof result> = {
+        code: 200,
+        data: result,
+        message: '获取调用记录成功',
+      };
+      res.status(200).json(response);
+    } catch (error) {
+      sendError(res, 500, '获取调用记录失败', error);
+    }
+  }
+
+  /** GET /call-logs/:id — 单条调用记录详情（含请求体快照，仅本人可见） */
+  private async getCallLogDetail(req: Request, res: Response): Promise<void> {
+    try {
+      const userId = req.user!.userId;
+      const log = await userAIConfigRepository.getCallLog(userId, String(req.params.id));
+      if (!log) {
+        sendNotFound(res);
+        return;
+      }
+      const response: ApiResponse<typeof log> = {
+        code: 200,
+        data: log,
+        message: '获取调用记录详情成功',
+      };
+      res.status(200).json(response);
+    } catch (error) {
+      sendError(res, 500, '获取调用记录详情失败', error);
     }
   }
 
