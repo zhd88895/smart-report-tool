@@ -1,31 +1,36 @@
 /**
  * AI 智能分析面板
- * 
+ *
  * 支持上传巡检日志文件，选择分析类别和 AI 模型，流式生成分析报告。
  * 未配置 AI 时显示引导提示。
+ *
+ * 分析任务由全局任务队列（analysisTaskStore）执行：
+ * - 切换到其他页面再回来，正在进行的分析状态完整保留
+ * - 分析中可「转后台运行」，立即准备下一个分析；多个任务自动排队逐个执行
  */
 
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Upload, FileText, Bot, Download, Trash2, AlertTriangle, CheckCircle, Zap, Settings, ChevronDown, ChevronUp, FileSpreadsheet, Archive } from 'lucide-react';
+import { Upload, FileText, Bot, Download, Trash2, AlertTriangle, CheckCircle, Zap, Settings, ChevronDown, ChevronUp, FileSpreadsheet, Archive, ListTodo, X, Loader2, Clock } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Textarea } from '@/components/ui/textarea';
 import { MarkdownRenderer } from '@/components/common/MarkdownRenderer';
-import { LoadingSpinner } from '@/components/common/LoadingSpinner';
 import { AssetSupplementForm, AssetSupplement, AssetType } from '@/components/AssetSupplementForm';
 import { KnowledgeFilePicker } from '@/components/report/KnowledgeFilePicker';
 import { ModelSelector } from '@/components/ai/ModelSelector';
 import { AIFallbackNotice } from '@/components/ai/AIFallbackNotice';
 import { useAIConfigStore } from '@/stores/aiConfigStore';
 import { useAuthStore } from '@/stores/authStore';
-import { getApiUrl, checkFileHashes } from '@/services/api';
+import { useAnalysisTaskStore, buildReportContent, buildReportFileName } from '@/stores/analysisTaskStore';
+import { getApiUrl } from '@/services/api';
 import { ROUTES } from '@/constants/routes';
 import { DEFAULT_PROMPTS } from '@/constants/analysisPrompts';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 
+/** 分析类别（胶囊选择器） */
 const CATEGORIES = [
   { key: 'host', label: '主机' },
   { key: 'storage', label: '存储' },
@@ -35,49 +40,17 @@ const CATEGORIES = [
   { key: 'other', label: '其他' },
 ] as const;
 
-/** 报告内容中的类别显示名（含支持包模式专用的 support 类别，不在胶囊选择器中展示） */
-const CATEGORY_LABELS: Record<string, string> = {
-  ...Object.fromEntries(CATEGORIES.map((c) => [c.key, c.label])),
-  support: '整机支持包',
-};
-
-/** 构建 AI 报告 Markdown 内容（导出与报告管理一致） */
-function buildReportContent(result: string, categoryKey: string, fileName: string, model: string): string {
-  const categoryLabel = CATEGORY_LABELS[categoryKey] || categoryKey;
-  return `# AI 巡检分析报告
-
-类别: ${categoryLabel}
-文件: ${fileName}
-模型: ${model}
-生成时间: ${new Date().toLocaleString()}
-
----
-
-${result}`;
-}
-
-/** 构建 AI 报告文件名（导出与报告管理一致） */
-function buildReportFileName(originalFileName: string): string {
-  const now = new Date();
-  const dateStr = `${String(now.getFullYear()).slice(2)}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-  const timeStr = `${String(now.getHours()).padStart(2, '0')}-${String(now.getMinutes()).padStart(2, '0')}-${String(now.getSeconds()).padStart(2, '0')}`;
-  return `AI分析报告（${originalFileName}）_${dateStr} ${timeStr}.md`;
-}
-
 export function AIAnalysisPanel() {
   const navigate = useNavigate();
   const { resolved, loadResolved, refreshResolved, currentModel } = useAIConfigStore();
   const { user } = useAuthStore();
+  const { tasks, activeTaskId, enqueue, setActiveTask, removeTask } = useAnalysisTaskStore();
   const [category, setCategory] = useState<string>('host');
   // 输入模式：单文件（默认）⇄ 支持包（压缩包整包分析）
   const [inputMode, setInputMode] = useState<'file' | 'archive'>('file');
   // 切到支持包模式前的类别，切回单文件模式时恢复
   const prevCategoryRef = useRef<string>('host');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [analyzing, setAnalyzing] = useState(false);
-  const [streamingText, setStreamingText] = useState('');
-  const [result, setResult] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
   // 结果区自动滚动：流式输出时跟随到最新内容；用户手动上翻时暂停跟随，回到底部附近后恢复
   const resultScrollRef = useRef<HTMLDivElement>(null);
   const userScrolledUpRef = useRef(false);
@@ -98,8 +71,12 @@ export function AIAnalysisPanel() {
   // 动态扩展名列表（从 /api/public-config 获取，与系统设置联动）
   const [archiveExts, setArchiveExts] = useState<string[]>(['.zip', '.tar', '.gz', '.tgz', '.tar.gz', '.tar.bz2', '.tar.xz']);
   const [textExts, setTextExts] = useState<string[]>(['.txt', '.log', '.conf', '.csv', '.xml', '.json', '.yml', '.yaml', '.out', '.err', '.md', '.xlsx', '.xls']);
-  // Agentic 分析进度消息（支持包智能分析模式）
-  const [packProgress, setPackProgress] = useState('');
+
+  /** 当前正在查看的任务（切页回来自动恢复） */
+  const activeTask = tasks.find((t) => t.id === activeTaskId) ?? null;
+  const taskRunning = activeTask?.status === 'running';
+  const hasRunningTask = tasks.some((t) => t.status === 'running');
+  const queuedCount = tasks.filter((t) => t.status === 'queued').length;
 
   // 当前类别实际使用的提示词（自定义 > 默认）
   const currentPrompt = customPrompts[category] ?? DEFAULT_PROMPTS[category];
@@ -144,14 +121,13 @@ export function AIAnalysisPanel() {
       if (selectedFile && isArchiveName(selectedFile.name)) setSelectedFile(null);
     }
     setInputMode(mode);
-    setResult(null); setStreamingText(''); setError(null);
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
       if (file.size > 50 * 1024 * 1024) { toast.error('文件不能超过 50MB'); return; }
-      setSelectedFile(file); setResult(null); setStreamingText(''); setError(null);
+      setSelectedFile(file);
       // 文件类型与模式不匹配时自动切换模式
       const isArchive = isArchiveName(file.name);
       if (isArchive && inputMode === 'file') {
@@ -172,7 +148,7 @@ export function AIAnalysisPanel() {
     const el = resultScrollRef.current;
     if (!el || userScrolledUpRef.current) return;
     el.scrollTop = el.scrollHeight;
-  }, [streamingText, result]);
+  }, [activeTask?.streamingText, activeTask?.result]);
 
   // 页面级跟随：主内容区（#app-main-scroll）滚动时，用户上翻离开底部则暂停，回到距底部 120px 内恢复
   useEffect(() => {
@@ -188,10 +164,10 @@ export function AIAnalysisPanel() {
   // 流式输出时主内容区同步滚到底部，保证最新内容始终可见（完成时最后定位一次）
   useEffect(() => {
     if (!pageFollowRef.current) return;
-    if (!analyzing && !result) return;
+    if (!taskRunning && !activeTask?.result) return;
     const sc = document.getElementById('app-main-scroll');
     if (sc) sc.scrollTop = sc.scrollHeight;
-  }, [streamingText, result, analyzing]);
+  }, [activeTask?.streamingText, activeTask?.result, taskRunning]);
 
   // 用户手动滚动：离开底部则暂停跟随，回到距底部 60px 内恢复跟随
   const handleResultScroll = (e: React.UIEvent<HTMLDivElement>) => {
@@ -199,98 +175,32 @@ export function AIAnalysisPanel() {
     userScrolledUpRef.current = el.scrollHeight - el.scrollTop - el.clientHeight > 60;
   };
 
-  const handleAnalyze = async () => {
-    if (!selectedFile || analyzing) return;
-    setAnalyzing(true); setResult(null); setStreamingText(''); setError(null);
-    userScrolledUpRef.current = false; // 新一轮分析恢复自动跟随滚动
-    pageFollowRef.current = true;      // 页面级跟随同步恢复
-    try {
-      // 秒传判定：完整计算文件 SHA-256，命中去重存储则不再上传
-      let dedupHash = '';
-      try {
-        const buf = await selectedFile.arrayBuffer();
-        const digest = await crypto.subtle.digest('SHA-256', buf);
-        const hash = [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
-        const existing = await checkFileHashes([hash]);
-        if (existing[hash]) dedupHash = hash;
-      } catch { /* 计算失败则走正常上传 */ }
-
-      const formData = new FormData();
-      if (dedupHash) formData.append('dedupHash', dedupHash);
-      else formData.append('file', selectedFile);
-      formData.append('category', category);
-      formData.append('customPrompt', currentPrompt);
-      formData.append('supplements', JSON.stringify(supplements));
-      formData.append('knowledgeFileIds', JSON.stringify(knowledgeFileIds));
-      formData.append('modelId', useAIConfigStore.getState().selectedModelId ?? '');
-      if (userHint.trim()) formData.append('userHint', userHint.trim());
-      const res = await fetch(getApiUrl('/ai/analyze-file'), { method: 'POST', credentials: 'include', body: formData });
-      if (!res.ok) { const data = await res.json().catch(() => ({})); throw new Error(data.message || data.error || '分析请求失败'); }
-      if (dedupHash) toast.info('文件已存在，使用秒传模式');
-      // 后端走 .env 系统默认兜底时打 X-AI-Fallback 响应头，点亮共享提示条
-      if (res.headers.get('X-AI-Fallback') === 'true') useAIConfigStore.getState().setFallbackNotice(true);
-      const reader = res.body?.getReader();
-      if (!reader) throw new Error('不支持流式响应');
-      const decoder = new TextDecoder(); let fullText = '';
-      // 跨 read 循环的行缓冲：TCP 分片可能把一条 data: 行切断，
-      // 只处理以 \n 结尾的完整行，不完整部分留给下一轮拼接（与 aiService.sendMessageStream 同款修法）
-      let buffer = '';
-      /** 解析一行 SSE 数据（忽略空行 / [DONE] / 非 data 行）；支持 pack_progress 进度消息和 fallback_notice */
-      const handleLine = (line: string) => {
-        const t = line.trim(); if (!t || !t.startsWith('data: ')) return;
-        const dp = t.slice(6); if (dp === '[DONE]') return;
-        try {
-          const parsed = JSON.parse(dp);
-          // Agentic 支持包分析的进度消息
-          if (parsed.type === 'pack_progress' && parsed.message) { setPackProgress(parsed.message); return; }
-          // Agentic 模式的 fallback 通知（无响应头，通过 SSE 传递）
-          if (parsed.type === 'fallback_notice') { useAIConfigStore.getState().setFallbackNotice(true); return; }
-          const delta = parsed.choices?.[0]?.delta?.content;
-          if (delta) { fullText += delta; setStreamingText(fullText); }
-        } catch { /* 忽略无法解析的行 */ }
-      };
-      try {
-        while (true) {
-          const { done, value } = await reader.read(); if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split('\n');
-          // 末尾不完整的一行（可能为空串）留到下一轮
-          buffer = lines.pop() || '';
-          for (const line of lines) handleLine(line);
-        }
-        // 流结束后若 buffer 还残留完整行，再处理一次
-        if (buffer.trim()) handleLine(buffer);
-      } finally { reader.releaseLock(); }
-      setResult(fullText); setStreamingText(''); setPackProgress('');
-      // 分析完成后自动保存到后端（保存与前端导出完全一致的内容和文件名）
-      try {
-        const reportContent = buildReportContent(fullText, category, selectedFile.name, currentModelName());
-        const saveRes = await fetch(getApiUrl('/reports/ai-save'), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
-          body: JSON.stringify({
-            content: reportContent,
-            originalFileName: selectedFile.name,
-            category,
-            author: user?.displayName || user?.username || '当前用户',
-          }),
-        });
-        if (saveRes.ok) {
-          toast.success('AI分析报告已自动保存到报告管理');
-        } else {
-          const errData = await saveRes.json().catch(() => ({}));
-          toast.error(errData.message || '报告保存失败');
-        }
-      } catch { /* 保存失败不影响分析结果展示 */ }
-    } catch (err: any) { setError(err.message || '分析失败'); toast.error(err.message || '分析失败'); }
-    finally { setAnalyzing(false); }
+  /** 提交分析：快照当前表单参数入队；有任务在跑则自动排队 */
+  const handleAnalyze = () => {
+    if (!selectedFile) return;
+    enqueue({
+      file: selectedFile,
+      category,
+      customPrompt: currentPrompt,
+      supplements,
+      knowledgeFileIds,
+      modelId: useAIConfigStore.getState().selectedModelId ?? null,
+      userHint,
+      author: user?.displayName || user?.username || '当前用户',
+      modelName: currentModelName(),
+    });
+    // 新一轮分析恢复自动跟随滚动
+    userScrolledUpRef.current = false;
+    pageFollowRef.current = true;
+    // 清空已选文件，便于直接准备下一个分析任务
+    setSelectedFile(null);
+    if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
   const handleExport = () => {
-    if (!result || !selectedFile) return;
-    const reportContent = buildReportContent(result, category, selectedFile.name, currentModelName());
-    const fileName = buildReportFileName(selectedFile.name);
+    if (!activeTask?.result) return;
+    const reportContent = buildReportContent(activeTask.result, activeTask.category, activeTask.fileName, activeTask.payload.modelName);
+    const fileName = buildReportFileName(activeTask.fileName);
     const blob = new Blob([reportContent], { type: 'text/markdown' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a'); a.href = url;
@@ -331,6 +241,45 @@ export function AIAnalysisPanel() {
 
   return (
     <div className="space-y-4">
+      {/* 任务队列条：运行中 / 排队 / 已完成任务一览，点击切换查看 */}
+      {tasks.length > 0 && (
+        <div className="flex items-center gap-2 flex-wrap rounded-lg border bg-card px-3 py-2">
+          <span className="text-xs text-muted-foreground flex items-center gap-1 shrink-0">
+            <ListTodo className="h-3.5 w-3.5" />
+            分析任务
+            {hasRunningTask && <span className="text-primary">· 1 个进行中</span>}
+            {queuedCount > 0 && <span className="text-amber-600">· {queuedCount} 个排队</span>}
+          </span>
+          {tasks.map((t) => (
+            <div
+              key={t.id}
+              className={cn(
+                'group flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs cursor-pointer transition-colors max-w-64',
+                t.id === activeTaskId ? 'border-primary bg-primary/10' : 'hover:bg-accent',
+              )}
+              onClick={() => setActiveTask(t.id)}
+              title={t.fileName}
+            >
+              {t.status === 'running' && <Loader2 className="h-3 w-3 animate-spin text-primary shrink-0" />}
+              {t.status === 'queued' && <Clock className="h-3 w-3 text-amber-500 shrink-0" />}
+              {t.status === 'done' && <CheckCircle className="h-3 w-3 text-green-500 shrink-0" />}
+              {t.status === 'error' && <AlertTriangle className="h-3 w-3 text-destructive shrink-0" />}
+              <span className="truncate">{t.fileName}</span>
+              {t.status !== 'running' && (
+                <button
+                  type="button"
+                  className="shrink-0 text-muted-foreground/50 hover:text-foreground"
+                  onClick={(e) => { e.stopPropagation(); removeTask(t.id); }}
+                  title="移除记录"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
       <Card>
         <CardHeader className="pb-2">
           <div className="flex items-center justify-between">
@@ -347,41 +296,36 @@ export function AIAnalysisPanel() {
           {inputMode === 'file' ? (
             <div className="space-y-2">
               <div className="text-sm font-medium text-muted-foreground">分析类别</div>
-              <div className="flex flex-wrap gap-2">
-                {CATEGORIES.map((cat) => (
+              <div className="flex flex-wrap gap-1 rounded-lg border p-1 w-fit">
+                {CATEGORIES.map((c) => (
                   <button
-                    key={cat.key}
+                    key={c.key}
                     type="button"
-                    disabled={analyzing}
-                    onClick={() => setCategory(cat.key)}
-                    className={cn(
-                      'px-4 py-2 rounded-full text-sm border transition-all',
-                      category === cat.key
-                        ? 'bg-primary text-primary-foreground border-primary shadow-sm'
-                        : 'bg-muted/50 text-muted-foreground border-transparent hover:bg-muted hover:text-foreground'
-                    )}
+                    onClick={() => setCategory(c.key)}
+                    className={cn('px-3.5 py-1.5 text-sm rounded-md transition-colors',
+                      category === c.key ? 'bg-primary text-primary-foreground shadow-sm'
+                        : 'text-muted-foreground hover:text-foreground hover:bg-muted')}
                   >
-                    {cat.label}
+                    {c.label}
                   </button>
                 ))}
               </div>
             </div>
           ) : (
-            <p className="text-sm text-muted-foreground rounded-md bg-muted/40 px-3 py-2">
+            <div className="rounded-md bg-muted/50 px-3 py-2 text-sm text-muted-foreground">
               支持包模式将自动拆包，并使用「整机支持包」分析提示词，无需选择分析类别。
-            </p>
+            </div>
           )}
 
-          {/* 输入模式 */}
+          {/* 输入模式切换 */}
           <div className="space-y-2">
             <div className="text-sm font-medium text-muted-foreground">输入模式</div>
-            <div className="inline-flex rounded-lg border bg-muted/40 p-0.5 text-sm">
+            <div className="flex flex-wrap gap-1 rounded-lg border p-1 w-fit">
               <button
                 type="button"
                 onClick={() => switchInputMode('file')}
-                className={cn('px-4 py-2 rounded-md transition-all',
-                  inputMode === 'file'
-                    ? 'bg-primary text-primary-foreground shadow-sm'
+                className={cn('px-3.5 py-1.5 text-sm rounded-md transition-colors',
+                  inputMode === 'file' ? 'bg-primary text-primary-foreground shadow-sm'
                     : 'text-muted-foreground hover:text-foreground')}
               >
                 单文件模式
@@ -389,9 +333,8 @@ export function AIAnalysisPanel() {
               <button
                 type="button"
                 onClick={() => switchInputMode('archive')}
-                className={cn('px-4 py-2 rounded-md transition-all',
-                  inputMode === 'archive'
-                    ? 'bg-primary text-primary-foreground shadow-sm'
+                className={cn('px-3.5 py-1.5 text-sm rounded-md transition-colors',
+                  inputMode === 'archive' ? 'bg-primary text-primary-foreground shadow-sm'
                     : 'text-muted-foreground hover:text-foreground')}
               >
                 支持包模式
@@ -470,7 +413,6 @@ export function AIAnalysisPanel() {
                   onChange={(e) => setCustomPrompts((prev) => ({ ...prev, [category]: e.target.value }))}
                   className="min-h-[140px] text-sm font-mono"
                   placeholder="输入自定义分析提示词..."
-                  disabled={analyzing}
                 />
                 <div className="flex justify-end gap-2">
                   <Button
@@ -513,7 +455,6 @@ export function AIAnalysisPanel() {
                 onChange={(e) => setUserHint(e.target.value)}
                 className="min-h-[60px] text-sm"
                 placeholder="可选：告诉 AI 重点关注方向，例如「已确认硬盘故障，请重点检查存储子系统」"
-                disabled={analyzing}
                 maxLength={2000}
               />
             )}
@@ -522,8 +463,7 @@ export function AIAnalysisPanel() {
 
           {/* 文件上传 */}
           <div className={cn('group border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-all',
-            selectedFile ? 'border-primary bg-primary/5' : 'border-muted-foreground/25 hover:border-primary/60 hover:bg-primary/[0.03]',
-            analyzing && 'pointer-events-none opacity-50')}
+            selectedFile ? 'border-primary bg-primary/5' : 'border-muted-foreground/25 hover:border-primary/60 hover:bg-primary/[0.03]')}
             onClick={() => fileInputRef.current?.click()}>
             <input ref={fileInputRef} type="file" className="hidden" accept={inputMode === 'archive' ? archiveExts.join(',') : textExts.join(',')} onChange={handleFileChange} />
             {selectedFile ? (
@@ -535,7 +475,7 @@ export function AIAnalysisPanel() {
                   <Badge variant="secondary" className="text-[10px]">整包智能分析</Badge>
                 )}
                 <div className="text-left"><p className="font-medium">{selectedFile.name}</p><p className="text-sm text-muted-foreground">{formatFileSize(selectedFile.size)}</p></div>
-                {!analyzing && <Button variant="ghost" size="icon" className="shrink-0" onClick={(e) => { e.stopPropagation(); setSelectedFile(null); setResult(null); }}><Trash2 className="h-4 w-4 text-muted-foreground" /></Button>}
+                <Button variant="ghost" size="icon" className="shrink-0" onClick={(e) => { e.stopPropagation(); setSelectedFile(null); }}><Trash2 className="h-4 w-4 text-muted-foreground" /></Button>
               </div>
             ) : (
               <div className="space-y-3">
@@ -554,37 +494,54 @@ export function AIAnalysisPanel() {
           </div>
 
           <div className="flex gap-2">
-            <Button onClick={handleAnalyze} disabled={!selectedFile || analyzing} className="flex-1 h-10 shadow-sm">
-              {analyzing ? <LoadingSpinner className="inline-flex py-0 mr-2" /> : <Zap className="h-4 w-4 mr-2" />}
-              {analyzing ? 'AI 分析中...' : '开始 AI 分析'}
+            <Button onClick={handleAnalyze} disabled={!selectedFile} className="flex-1 h-10 shadow-sm">
+              <Zap className="h-4 w-4 mr-2" />
+              {hasRunningTask ? '加入分析队列' : '开始 AI 分析'}
             </Button>
-            {result && <Button variant="outline" className="h-10" onClick={handleExport}><Download className="h-4 w-4 mr-2" />导出报告</Button>}
           </div>
-          {/* Agentic 支持包分析进度 */}
-          {analyzing && packProgress && (
-            <div className="flex items-center gap-2 rounded-md bg-primary/5 border border-primary/20 px-3 py-2 text-sm text-primary animate-pulse">
-              <Bot className="h-4 w-4 shrink-0" />
-              {packProgress}
-            </div>
-          )}
         </CardContent>
       </Card>
 
-      {(streamingText || result || error) && (
+      {/* 结果卡片：查看中的任务（运行中/完成/失败） */}
+      {activeTask && (activeTask.status === 'running' || activeTask.streamingText || activeTask.result || activeTask.error) && (
         <Card>
           <CardHeader className="pb-2">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
               <CardTitle className="text-base flex items-center gap-2">
-                {error ? <AlertTriangle className="h-4 w-4 text-destructive" /> : <CheckCircle className="h-4 w-4 text-green-500" />}
-                {analyzing ? '分析中...' : error ? '分析出错' : '分析结果'}
+                {activeTask.error ? <AlertTriangle className="h-4 w-4 text-destructive" />
+                  : taskRunning ? <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                  : <CheckCircle className="h-4 w-4 text-green-500" />}
+                {taskRunning ? '分析中...' : activeTask.error ? '分析出错' : '分析结果'}
+                <span className="text-xs font-normal text-muted-foreground truncate max-w-72" title={activeTask.fileName}>
+                  {activeTask.fileName}
+                </span>
               </CardTitle>
+              <div className="flex items-center gap-2">
+                {taskRunning && (
+                  <Button variant="outline" size="sm" className="h-8" onClick={() => setActiveTask(null)}>
+                    <ListTodo className="h-3.5 w-3.5 mr-1.5" />转后台运行
+                  </Button>
+                )}
+                {activeTask.result && (
+                  <Button variant="outline" size="sm" className="h-8" onClick={handleExport}>
+                    <Download className="h-3.5 w-3.5 mr-1.5" />导出报告
+                  </Button>
+                )}
+              </div>
             </div>
           </CardHeader>
-          <CardContent>
-            {error ? (
+          <CardContent className="space-y-3">
+            {/* Agentic 支持包分析进度 */}
+            {taskRunning && activeTask.packProgress && (
+              <div className="flex items-center gap-2 rounded-md bg-primary/5 border border-primary/20 px-3 py-2 text-sm text-primary animate-pulse">
+                <Bot className="h-4 w-4 shrink-0" />
+                {activeTask.packProgress}
+              </div>
+            )}
+            {activeTask.error ? (
               <div className="space-y-2">
-                <p className="text-sm text-destructive">{error}</p>
-                {error.includes('401') || error.includes('无效') || error.includes('过期') ? (
+                <p className="text-sm text-destructive">{activeTask.error}</p>
+                {activeTask.error.includes('401') || activeTask.error.includes('无效') || activeTask.error.includes('过期') ? (
                   <Button variant="outline" size="sm" onClick={() => navigate(ROUTES.AI_SETTINGS)}>
                     <Settings className="h-3.5 w-3.5 mr-1" />检查 API 配置
                   </Button>
@@ -593,7 +550,7 @@ export function AIAnalysisPanel() {
             ) : (
               <div ref={resultScrollRef} onScroll={handleResultScroll} className="max-h-[60vh] overflow-y-auto pr-2">
                 <div className="prose prose-sm max-w-none">
-                  <MarkdownRenderer content={streamingText || result || ''} />
+                  <MarkdownRenderer content={activeTask.streamingText || activeTask.result || ''} />
                 </div>
               </div>
             )}
