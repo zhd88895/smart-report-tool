@@ -364,8 +364,8 @@ export class AIConfigRoutes {
   private async testConnection(req: Request, res: Response): Promise<void> {
     try {
       const userId = req.user!.userId;
-      const { providerId, vendorKey, baseUrl, apiKey } = req.body ?? {};
-      const result = await userAIConfigService.testConnection(userId, { providerId, vendorKey, baseUrl, apiKey });
+      const { providerId, vendorKey, baseUrl, apiKey, modelId } = req.body ?? {};
+      const result = await userAIConfigService.testConnection(userId, { providerId, vendorKey, baseUrl, apiKey, modelId });
       if (!result) {
         sendNotFound(res);
         return;

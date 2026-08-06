@@ -213,11 +213,19 @@ export async function fetchProviderModels(providerId: string, doImport = false):
 
 // ── 辅助 ──
 
-/** 测试连接：providerId（已保存厂商）或内联 { vendorKey, baseUrl, apiKey } */
+/** 连接/模型测试结果（带 modelId 时含耗时与回复摘要） */
+export interface ConnectionTestResult {
+  ok: boolean;
+  latencyMs?: number;
+  reply?: string;
+  error?: string;
+}
+
+/** 测试连接：providerId（已保存厂商）或内联 { vendorKey, baseUrl, apiKey }；附带 modelId 时测试该模型的真实对话可用性 */
 export async function testConnection(
-  body: { providerId: string } | { vendorKey: string; baseUrl?: string; apiKey?: string }
-): Promise<{ ok: boolean; error?: string }> {
-  return request<{ ok: boolean; error?: string }>('/ai-config/test-connection', {
+  body: ({ providerId: string } | { vendorKey: string; baseUrl?: string; apiKey?: string }) & { modelId?: string }
+): Promise<ConnectionTestResult> {
+  return request<ConnectionTestResult>('/ai-config/test-connection', {
     method: 'POST', ...jsonBody(body),
   });
 }

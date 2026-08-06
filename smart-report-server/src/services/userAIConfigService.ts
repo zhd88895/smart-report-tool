@@ -442,24 +442,29 @@ export const userAIConfigService = {
    * 测试连接：两种入参——
    * 1. providerId：取库中配置（隔离校验，不存在返回 null）
    * 2. 内联配置 { vendorKey, baseUrl?, apiKey }（不持久化）
+   * 附带 modelId（厂商侧模型标识）时测试该模型的真实对话可用性，
+   * 否则仅探测厂商默认模型。
    */
   async testConnection(
     userId: string,
-    body: { providerId?: string; vendorKey?: string; baseUrl?: string; apiKey?: string }
-  ): Promise<{ ok: boolean; error?: string } | null> {
+    body: { providerId?: string; vendorKey?: string; baseUrl?: string; apiKey?: string; modelId?: string }
+  ): Promise<{ ok: boolean; latencyMs?: number; reply?: string; error?: string } | null> {
     if (body.providerId) {
       const provider = await userAIConfigRepository.getProvider(userId, body.providerId);
       if (!provider) return null;
+      if (body.modelId) return testModelConnection(provider, body.modelId);
       return testProviderConnection(provider);
     }
     if (!body.vendorKey || !VENDOR_QUIRKS[body.vendorKey as VendorKey]) {
       throw new Error('不支持的厂商类型');
     }
-    return testProviderConnection({
+    const inline = {
       vendor_key: body.vendorKey,
       base_url: body.baseUrl ?? '',
       api_key: body.apiKey ?? '',
-    });
+    };
+    if (body.modelId) return testModelConnection(inline, body.modelId);
+    return testProviderConnection(inline);
   },
 
   /**

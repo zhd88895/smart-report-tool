@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { CheckCircle2, XCircle, Zap } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -6,10 +7,11 @@ import { Switch } from '@/components/ui/switch';
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
+import { LoadingSpinner } from '@/components/common/LoadingSpinner';
 import { toast } from 'sonner';
 import {
-  createModel, updateModel, setDefaultModel,
-  type AIModel,
+  createModel, updateModel, setDefaultModel, testConnection,
+  type AIModel, type ConnectionTestResult,
 } from '@/services/aiConfigService';
 
 interface ModelForm {
@@ -41,6 +43,8 @@ interface ModelDialogProps {
 export function ModelDialog({ open, onOpenChange, providerId, editingModel, onSaved }: ModelDialogProps) {
   const [form, setForm] = useState<ModelForm>(EMPTY_MODEL_FORM);
   const [saving, setSaving] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<ConnectionTestResult | null>(null);
 
   // 弹窗打开时初始化表单：新增用空表单，编辑回填现有模型
   useEffect(() => {
@@ -57,7 +61,24 @@ export function ModelDialog({ open, onOpenChange, providerId, editingModel, onSa
     } else {
       setForm(EMPTY_MODEL_FORM);
     }
+    setTestResult(null);
   }, [open, editingModel]);
+
+  /** 用当前厂商的已保存配置，对表单中的模型 ID 做真实对话测试 */
+  const handleTestModel = async () => {
+    if (!providerId) return;
+    if (!form.modelId.trim()) { toast.error('请先填写模型 ID'); return; }
+    setTesting(true);
+    setTestResult(null);
+    try {
+      const result = await testConnection({ providerId, modelId: form.modelId.trim() });
+      setTestResult(result);
+    } catch (err: any) {
+      setTestResult({ ok: false, error: err.message || '模型测试失败' });
+    } finally {
+      setTesting(false);
+    }
+  };
 
   const handleSave = async () => {
     if (!providerId) return;
@@ -116,10 +137,33 @@ export function ModelDialog({ open, onOpenChange, providerId, editingModel, onSa
             <Label>模型 ID</Label>
             <Input
               value={form.modelId}
-              onChange={(e) => setForm((f) => ({ ...f, modelId: e.target.value }))}
+              onChange={(e) => { setForm((f) => ({ ...f, modelId: e.target.value })); setTestResult(null); }}
               placeholder="例如：mimo-v2.5-pro"
               disabled={!!editingModel}
             />
+          </div>
+          {/* 保存前可用厂商已保存的配置实测该模型 ID 是否可用 */}
+          <div className="flex items-center gap-3 flex-wrap">
+            <Button
+              type="button" variant="outline" size="sm"
+              onClick={handleTestModel} disabled={testing || !providerId}
+            >
+              {testing ? <LoadingSpinner className="inline-flex py-0 mr-1" /> : <Zap className="h-3.5 w-3.5 mr-1" />}
+              测试模型
+            </Button>
+            {testResult && (
+              testResult.ok ? (
+                <span className="flex items-center gap-1 text-sm text-green-600" title={testResult.reply}>
+                  <CheckCircle2 className="h-4 w-4" />
+                  模型可用{testResult.latencyMs != null ? `（${(testResult.latencyMs / 1000).toFixed(1)}s）` : ''}
+                  {testResult.reply ? `：${testResult.reply.slice(0, 40)}` : ''}
+                </span>
+              ) : (
+                <span className="flex items-center gap-1 text-sm text-destructive" title={testResult.error}>
+                  <XCircle className="h-4 w-4" />测试失败{testResult.error ? `：${testResult.error}` : ''}
+                </span>
+              )
+            )}
           </div>
           <div className="space-y-2">
             <Label>显示名</Label>
