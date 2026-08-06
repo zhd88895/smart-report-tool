@@ -22,7 +22,7 @@ import {
 import { toast } from 'sonner';
 import {
   FolderPlus, Upload, Search, Trash2, Edit, FileText, FileCode,
-  Archive, RefreshCw, Folder, AlertCircle, Check, Download,
+  Archive, RefreshCw, Folder, AlertCircle, Download,
 } from 'lucide-react';
 import { ConfirmDialog } from '@/components/common/ConfirmDialog';
 import { DataTable } from '@/components/common/DataTable';
@@ -293,6 +293,11 @@ export default function KnowledgeBasePage() {
         <span className="flex items-center gap-2 min-w-0">
           <span className="shrink-0">{getFileIcon(file.file_ext)}</span>
           <span className="font-medium truncate">{file.title}</span>
+          {file.status === 'error' && (
+            <Badge variant="destructive" className="text-xs shrink-0">
+              <AlertCircle className="h-3 w-3 mr-1" />解析失败
+            </Badge>
+          )}
         </span>
       ),
     },
@@ -311,25 +316,6 @@ export default function KnowledgeBasePage() {
       sortable: true,
       sortValue: (file: KBFile) => file.file_size,
       render: (file: KBFile) => <span className="text-sm">{formatFileSize(file.file_size)}</span>,
-    },
-    {
-      key: 'status',
-      header: '状态',
-      sortable: true,
-      sortValue: (file: KBFile) => file.status,
-      render: (file: KBFile) => (
-        file.status === 'ready' ? (
-          <Badge variant="default" className="text-xs">
-            <Check className="h-3 w-3 mr-1" />就绪
-          </Badge>
-        ) : file.status === 'error' ? (
-          <Badge variant="destructive" className="text-xs">
-            <AlertCircle className="h-3 w-3 mr-1" />解析失败
-          </Badge>
-        ) : (
-          <Badge variant="secondary" className="text-xs">{file.status}</Badge>
-        )
-      ),
     },
     {
       key: 'created_at',
