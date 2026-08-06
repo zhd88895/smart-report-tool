@@ -64,6 +64,13 @@ export class ReportRoutes {
     // 列出报告文件（需要认证）
     this.router.get('/:id/files', authenticate, this.getReportFiles.bind(this));
 
+    // 读取报告文件文本内容（在线预览，需要认证）
+    this.router.get(
+      '/:id/file-content',
+      authenticate,
+      this.getReportFileContent.bind(this)
+    );
+
     // 下载报告文件（需要认证）
     this.router.get(
       '/:id/download',
@@ -443,6 +450,39 @@ export class ReportRoutes {
         };
         res.status(400).json(response);
       }
+    }
+  }
+
+  /**
+   * 读取报告文件文本内容（在线预览）
+   *
+   * @param req - Express请求对象
+   * @param res - Express响应对象
+   */
+  private async getReportFileContent(req: Request, res: Response): Promise<void> {
+    try {
+      const id = req.params.id as string;
+      const fileIndex = req.query.fileIndex as string;
+
+      const result = await reportService.getReportFileContent(
+        id,
+        fileIndex ? parseInt(fileIndex) : undefined
+      );
+
+      const response: ApiResponse<{ fileName: string; content: string; size: number }> = {
+        code: 200,
+        data: result,
+        message: 'success',
+      };
+      res.json(response);
+    } catch (error: any) {
+      const response: ApiResponse<null> = {
+        code: 400,
+        data: null,
+        message: '读取文件内容失败',
+        error: safeErrorMessage(error),
+      };
+      res.status(400).json(response);
     }
   }
 

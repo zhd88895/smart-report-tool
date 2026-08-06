@@ -1608,6 +1608,46 @@ export class ReportService {
   }
 
   /**
+   * 读取报告文件的文本内容（用于网页在线预览）
+   *
+   * 仅允许文本类扩展名，限制文件大小，避免二进制/超大文件拖垮服务。
+   *
+   * @param reportId - 报告ID
+   * @param fileIndex - 文件索引（可选，默认第一个文件）
+   * @returns 文件名与 UTF-8 文本内容
+   * @throws {Error} 如果报告/文件不存在、类型不支持或文件过大
+   */
+  async getReportFileContent(
+    reportId: string,
+    fileIndex?: number
+  ): Promise<{
+    fileName: string;
+    content: string;
+    size: number;
+  }> {
+    // 复用下载逻辑的报告归属与文件路径解析（含 filePaths 顺序与产物过滤）
+    const fileInfo = await this.downloadReport(reportId, fileIndex);
+
+    const TEXT_EXTS = ['.md', '.txt', '.log', '.json', '.csv', '.html'];
+    const ext = path.extname(fileInfo.fileName).toLowerCase();
+    if (!TEXT_EXTS.includes(ext)) {
+      throw new Error('该文件类型不支持在线查看');
+    }
+
+    const MAX_CONTENT_SIZE = 10 * 1024 * 1024; // 10MB
+    if (fileInfo.fileSize > MAX_CONTENT_SIZE) {
+      throw new Error('文件过大，无法在线查看（上限 10MB），请下载后查看');
+    }
+
+    const content = await fs.readFile(fileInfo.filePath, 'utf-8');
+    return {
+      fileName: fileInfo.fileName,
+      content,
+      size: fileInfo.fileSize,
+    };
+  }
+
+  /**
    * 批量下载报告文件（tar.gz）
    * 
    * @param reportId - 报告ID

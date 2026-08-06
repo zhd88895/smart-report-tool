@@ -5,6 +5,7 @@ import { ConfirmDialog } from '@/components/common/ConfirmDialog';
 import { ReportFilterBar } from '@/components/reports/ReportFilterBar';
 import { ReportListTable } from '@/components/reports/ReportListTable';
 import { ReportPreviewDialog, ReportFileInfo, isReportOutputFile } from '@/components/reports/ReportPreviewDialog';
+import { ReportViewDialog } from '@/components/reports/ReportViewDialog';
 import { useReports } from '@/hooks/useReports';
 import { useAuthStore } from '@/stores/authStore';
 import { useUserStore } from '@/stores/userStore';
@@ -52,6 +53,9 @@ export default function ReportsPage() {
   const [filesReport, setFilesReport] = useState<Report | null>(null);
   const [reportFiles, setReportFiles] = useState<ReportFileInfo[]>([]);
   const [filesLoading, setFilesLoading] = useState(false);
+
+  // AI 报告在线查看弹窗
+  const [viewReport, setViewReport] = useState<Report | null>(null);
 
   const canDelete = canAccess(user?.role, 'deleteReport');
 
@@ -288,9 +292,11 @@ export default function ReportsPage() {
         canDeleteReport={canDeleteReport}
         onViewLogs={fetchLogs}
         onViewFiles={fetchReportFiles}
+        onViewReport={setViewReport}
         onDelete={setDeleteTarget}
         tableId={`report-list-${activeTab}`}
       />
+      <ReportViewDialog report={viewReport} onClose={() => setViewReport(null)} />
 
       {/* 删除确认 */}
       <ConfirmDialog

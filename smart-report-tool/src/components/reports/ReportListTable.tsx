@@ -1,4 +1,4 @@
-import { FileText, FolderOpen, Trash2 } from 'lucide-react';
+import { Eye, FileText, FolderOpen, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { DataTable } from '@/components/common/DataTable';
@@ -19,6 +19,8 @@ export interface ReportListTableProps {
   canDeleteReport: (report: Report) => boolean;
   onViewLogs: (report: Report) => void;
   onViewFiles: (report: Report) => void;
+  /** 在线查看（AI 报告专用，直接渲染 Markdown 内容） */
+  onViewReport?: (report: Report) => void;
   onDelete: (report: Report) => void;
   /** 表格标识：传入后启用列宽拖拽/列显隐并持久化（AI/脚本 Tab 由调用方区分） */
   tableId?: string;
@@ -33,6 +35,7 @@ export function ReportListTable({
   canDeleteReport,
   onViewLogs,
   onViewFiles,
+  onViewReport,
   onDelete,
   tableId,
 }: ReportListTableProps) {
@@ -69,6 +72,11 @@ export function ReportListTable({
         const isAI = (item.reportSource || 'script') === 'ai';
         return (
         <div className="flex gap-1">
+          {isAI && onViewReport && (
+            <Button variant="ghost" size="icon" className="h-8 w-8" title="在线查看" onClick={() => onViewReport(item)}>
+              <Eye className="h-4 w-4" />
+            </Button>
+          )}
           {!isAI && (
             <Button variant="ghost" size="icon" className="h-8 w-8" title="查看执行日志" onClick={() => onViewLogs(item)}>
               <FileText className="h-4 w-4" />
