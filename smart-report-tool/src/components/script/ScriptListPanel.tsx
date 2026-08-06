@@ -6,15 +6,12 @@ import { getApiUrl, fetchWithAuth } from '@/services/api';
 import { canAccess } from '@/utils/permissions';
 import { Script } from '@/types';
 import { formatFileSize, formatDateShort } from '@/utils/formatters';
-import { ConfirmDialog } from '@/components/common/ConfirmDialog';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { SearchFilter } from '@/components/common/SearchFilter';
 import { EmptyState } from '@/components/common/EmptyState';
-import { toast } from 'sonner';
-import { Trash2, Pencil, Loader2, Check, PackageCheck, AlertCircle, ChevronDown, ChevronRight } from 'lucide-react';
+import { Loader2, Check, PackageCheck, AlertCircle, ChevronDown, ChevronRight } from 'lucide-react';
 import { AuxFileList } from './AuxFileList';
 import { InstallDepsDialog } from './InstallDepsDialog';
 import { SCRIPT_TYPE_LABELS, LOG_CATEGORY_LABELS, REGION_LIST, isDepsStatusDone } from './constants';
@@ -26,13 +23,12 @@ export interface ScriptListPanelProps {
 
 export function ScriptListPanel({ onEditScript }: ScriptListPanelProps) {
   const { user } = useAuthStore();
-  const { scripts, fetchScripts, removeScript } = useScriptStore();
+  const { scripts, fetchScripts } = useScriptStore();
   const { docTemplates } = useDocTemplateStore();
   const canManage = canAccess(user?.role, 'scripts');
   const [searchQuery, setSearchQuery] = useState('');
   const [regionFilter, setRegionFilter] = useState<string>('全部');
   const [categoryFilter, setCategoryFilter] = useState<string>('全部');
-  const [deleteTarget, setDeleteTarget] = useState<Script | null>(null);
   // 辅助文件展开状态（按脚本 id）
   const [expandedAux, setExpandedAux] = useState<Record<string, boolean>>({});
 
@@ -130,10 +126,6 @@ export function ScriptListPanel({ onEditScript }: ScriptListPanelProps) {
     return result;
   })();
 
-  const handleDelete = async () => {
-    if (deleteTarget) { await removeScript(deleteTarget.id); setDeleteTarget(null); toast.success('已删除'); }
-  };
-
   /** 启动依赖安装（SSE 流式） */
   const handleInstallDeps = (scriptId: string) => {
     // Abort previous install
@@ -222,7 +214,7 @@ export function ScriptListPanel({ onEditScript }: ScriptListPanelProps) {
     if (sel.scriptType !== 'python') return null;
     // 当前卡片正在安装依赖
     if (installingScriptId === sel.id) {
-      return <Badge className="text-xs bg-yellow-100 text-yellow-700 hover:bg-yellow-200 cursor-pointer" onClick={() => setShowInstallDialog(true)}><Loader2 className="h-3 w-3 mr-1 animate-spin" />正在安装依赖</Badge>;
+      return <Badge className="text-xs bg-yellow-100 text-yellow-700 hover:bg-yellow-200 cursor-pointer" onClick={(e) => { e.stopPropagation(); setShowInstallDialog(true); }}><Loader2 className="h-3 w-3 mr-1 animate-spin" />正在安装依赖</Badge>;
     }
     const ds = sel.depsStatus;
     const hasReqs = (sel.requirements?.length || 0) > 0;
@@ -234,14 +226,14 @@ export function ScriptListPanel({ onEditScript }: ScriptListPanelProps) {
       return null;
     }
     if (!ds || ds.status === 'none') {
-      return <Badge variant="outline" className="text-xs text-muted-foreground cursor-pointer hover:bg-accent" onClick={() => handleInstallDeps(sel.id)}><PackageCheck className="h-3 w-3 mr-1" />环境及依赖未就绪</Badge>;
+      return <Badge variant="outline" className="text-xs text-muted-foreground cursor-pointer hover:bg-accent" onClick={(e) => { e.stopPropagation(); handleInstallDeps(sel.id); }}><PackageCheck className="h-3 w-3 mr-1" />环境及依赖未就绪</Badge>;
     }
     if (ds.status === 'env_ready') {
-      return <Badge variant="outline" className="text-xs text-orange-600 border-orange-200 bg-orange-50 cursor-pointer hover:bg-orange-100" onClick={() => handleInstallDeps(sel.id)}><PackageCheck className="h-3 w-3 mr-1" />依赖未就绪</Badge>;
+      return <Badge variant="outline" className="text-xs text-orange-600 border-orange-200 bg-orange-50 cursor-pointer hover:bg-orange-100" onClick={(e) => { e.stopPropagation(); handleInstallDeps(sel.id); }}><PackageCheck className="h-3 w-3 mr-1" />依赖未就绪</Badge>;
     }
-    if (ds.status === 'installing') return <Badge className="text-xs bg-yellow-100 text-yellow-700 hover:bg-yellow-200 cursor-pointer" onClick={() => setShowInstallDialog(true)}><Loader2 className="h-3 w-3 mr-1 animate-spin" />正在安装依赖</Badge>;
+    if (ds.status === 'installing') return <Badge className="text-xs bg-yellow-100 text-yellow-700 hover:bg-yellow-200 cursor-pointer" onClick={(e) => { e.stopPropagation(); setShowInstallDialog(true); }}><Loader2 className="h-3 w-3 mr-1 animate-spin" />正在安装依赖</Badge>;
     if (isDepsStatusDone(ds.status)) return <Badge className="text-xs bg-green-100 text-green-700 hover:bg-green-200"><Check className="h-3 w-3 mr-1" />已就绪</Badge>;
-    if (ds.status === 'failed') return <Badge variant="destructive" className="text-xs cursor-pointer" onClick={() => handleInstallDeps(sel.id)}><AlertCircle className="h-3 w-3 mr-1" />安装失败</Badge>;
+    if (ds.status === 'failed') return <Badge variant="destructive" className="text-xs cursor-pointer" onClick={(e) => { e.stopPropagation(); handleInstallDeps(sel.id); }}><AlertCircle className="h-3 w-3 mr-1" />安装失败</Badge>;
     return null;
   };
 
@@ -274,11 +266,11 @@ export function ScriptListPanel({ onEditScript }: ScriptListPanelProps) {
             if (sel.scriptType === 'python' && sel.pythonVersion && sel.pythonVersion !== 'embedded') {
               metaItems.push(`Python ${sel.pythonVersion}`);
             }
-            metaItems.push(`${sel.fileName}（${formatFileSize(sel.fileSize)}）${sel.isMultiFile ? ' · 多文件' : ''}`);
+            metaItems.push(`${sel.fileName}（${formatFileSize(sel.fileSize)}）`);
             metaItems.push(formatDateShort(sel.uploadedAt));
-            if (sel.uploadedBy) metaItems.push(sel.uploadedBy);
+            if (sel.uploaderName && sel.uploaderName !== 'unknown') metaItems.push(sel.uploaderName);
             return (
-              <Card key={group.name}>
+              <Card key={group.name} className={canEditScript(sel) ? 'cursor-pointer hover:shadow-md hover:border-primary/30 transition-all' : ''} onClick={() => { if (canEditScript(sel)) onEditScript(sel); }}>
                 <CardContent className="p-3">
                   {/* 头部行：名称+版本 | 类型/分类/区域/依赖状态 */}
                   <div className="flex items-center justify-between gap-2">
@@ -286,7 +278,7 @@ export function ScriptListPanel({ onEditScript }: ScriptListPanelProps) {
                       <span className="font-semibold text-base truncate">{group.name}</span>
                       {group.items.length > 1 ? (
                         <Select value={sel.id} onValueChange={(v) => setVersionSelections({ ...versionSelections, [group.name]: v })}>
-                          <SelectTrigger className="h-6 w-auto gap-1 border-none bg-transparent p-0 text-sm text-muted-foreground hover:text-foreground shadow-none">
+                          <SelectTrigger className="h-6 w-auto gap-1 border-none bg-transparent p-0 text-sm text-muted-foreground hover:text-foreground shadow-none" onClick={(e) => e.stopPropagation()}>
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
@@ -332,7 +324,7 @@ export function ScriptListPanel({ onEditScript }: ScriptListPanelProps) {
                     <div className="mt-2">
                       <button
                         className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
-                        onClick={() => setExpandedAux((prev) => ({ ...prev, [sel.id]: !prev[sel.id] }))}
+                        onClick={(e) => { e.stopPropagation(); setExpandedAux((prev) => ({ ...prev, [sel.id]: !prev[sel.id] })); }}
                       >
                         {expandedAux[sel.id] ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
                         辅助文件（{sel.auxiliaryFiles.length}）
@@ -344,21 +336,12 @@ export function ScriptListPanel({ onEditScript }: ScriptListPanelProps) {
                       )}
                     </div>
                   )}
-                  {/* 操作按钮：固定右下 */}
-                  {canEditScript(sel) && (
-                    <div className="flex justify-end gap-1 mt-2">
-                      <Button variant="ghost" size="icon" onClick={() => onEditScript(sel)}><Pencil className="h-4 w-4" /></Button>
-                      <Button variant="ghost" size="icon" onClick={() => setDeleteTarget(sel)}><Trash2 className="h-4 w-4" /></Button>
-                    </div>
-                  )}
                 </CardContent>
               </Card>
             );
           })}
         </div>
       )}
-
-      <ConfirmDialog open={!!deleteTarget} onOpenChange={() => setDeleteTarget(null)} onConfirm={handleDelete} title="删除脚本" description={`确定要删除「${deleteTarget?.name}」v${deleteTarget?.version} 吗？`} />
 
       {/* ═════ 依赖安装进度弹窗 ═════ */}
       <InstallDepsDialog

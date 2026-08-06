@@ -4,6 +4,7 @@ import { useScriptStore } from '@/stores/scriptStore';
 import { useDocTemplateStore } from '@/stores/docTemplateStore';
 import { apiPost, apiDelete, downloadFile } from '@/services/api';
 import { Script, ScriptType, ScriptRegion, LogCategory, AuxFile } from '@/types';
+import { canAccess } from '@/utils/permissions';
 import { formatFileSize } from '@/utils/formatters';
 import { FileUploader, getFilePath } from '@/components/common/FileUploader';
 import { ConfirmDialog } from '@/components/common/ConfirmDialog';
@@ -88,6 +89,9 @@ export function ScriptFormDialog({ open, onOpenChange, editTarget, onEditTargetC
 
   // 清空脚本文件确认弹窗
   const [showClearFilesDialog, setShowClearFilesDialog] = useState(false);
+
+  // 删除脚本确认弹窗
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   // 折叠区块：高级设置 / 模板与依赖（默认收起，每次打开对话框重置）
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -391,6 +395,32 @@ export function ScriptFormDialog({ open, onOpenChange, editTarget, onEditTargetC
       toast.error(err.message || '清空脚本文件失败');
     } finally {
       setShowClearFilesDialog(false);
+    }
+  };
+
+  /** 判断当前用户是否能删除指定脚本（与列表页 canEditScript 逻辑一致：admin 全部，senior 限自己区域） */
+  const canDeleteScript = (script: Script | null): boolean => {
+    if (!script || !canAccess(user?.role, 'scripts')) return false;
+    if (user?.role === 'admin') return true;
+    if (user?.role === 'senior') {
+      const userRegion = user.region || '全部';
+      const scriptRegion = script.region || '全部';
+      return userRegion === '全部' || scriptRegion === '全部' || scriptRegion === userRegion;
+    }
+    return false;
+  };
+
+  /** 删除当前编辑的脚本 */
+  const handleDeleteScript = async () => {
+    if (!editTarget) return;
+    try {
+      const { removeScript } = useScriptStore.getState();
+      await removeScript(editTarget.id);
+      toast.success('脚本已删除');
+      setShowDeleteConfirm(false);
+      onOpenChange(false); // 关闭编辑对话框
+    } catch (err: any) {
+      toast.error(err.message || '删除失败');
     }
   };
 
@@ -885,7 +915,13 @@ export function ScriptFormDialog({ open, onOpenChange, editTarget, onEditTargetC
           </div>
           </div>
           {/* 固定在底部的按钮栏（不随表单滚动） */}
-          <div className="flex justify-end gap-2 pt-4 border-t">
+          <div className="flex items-center gap-2 pt-4 border-t">
+            {editTarget && canDeleteScript(editTarget) && (
+              <Button variant="ghost" className="text-destructive hover:text-destructive hover:bg-destructive/10" onClick={() => setShowDeleteConfirm(true)}>
+                <Trash2 className="h-4 w-4 mr-1" />删除脚本
+              </Button>
+            )}
+            <div className="flex-1" />
             <Button variant="outline" onClick={() => onOpenChange(false)}>取消</Button>
             {editTarget ? (
               <Button onClick={handleEdit} disabled={uploading}>{uploading ? '保存中...' : '保存修改'}</Button>
@@ -902,6 +938,15 @@ export function ScriptFormDialog({ open, onOpenChange, editTarget, onEditTargetC
         onConfirm={handleClearFiles}
         title="清空脚本文件"
         description={`确定要清空「${editTarget?.name || ''}」的所有脚本文件吗？此操作将删除多文件模式下的全部 .py 文件，且不可撤销。`}
+        destructive
+      />
+
+      <ConfirmDialog
+        open={showDeleteConfirm}
+        onOpenChange={setShowDeleteConfirm}
+        onConfirm={handleDeleteScript}
+        title="删除脚本"
+        description={`确定要删除「${editTarget?.name}」v${editTarget?.version} 吗？此操作不可撤销。`}
         destructive
       />
 

@@ -77,6 +77,8 @@ export interface Script {
   uploadedAt: string;
   /** 上传者 */
   uploadedBy: string;
+  /** 上传者显示名（通过 JOIN users 表获取） */
+  uploaderName?: string;
 }
 
 /**

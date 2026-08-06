@@ -81,6 +81,8 @@ export interface Script {
   reportNameTemplate?: string;
   uploadedAt: string;
   uploadedBy: string;
+  /** 上传者显示名（后端 JOIN users 表返回） */
+  uploaderName?: string;
 }
 
 export interface DocTemplate {

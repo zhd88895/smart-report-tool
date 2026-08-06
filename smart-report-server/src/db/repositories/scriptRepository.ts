@@ -41,6 +41,7 @@ function rowToScript(row: any): Script {
     reportNameTemplate: row.report_name_template || '',
     uploadedAt: row.uploaded_at,
     uploadedBy: row.uploaded_by || 'unknown',
+    uploaderName: row.uploader_name || row.uploaded_by || 'unknown',
   };
 }
 
@@ -77,20 +78,23 @@ export const scriptRepository = {
     const params: any[] = [];
 
     if (filter?.region) {
-      conditions.push('region = ?');
+      conditions.push('s.region = ?');
       params.push(filter.region);
     }
     if (filter?.category) {
-      conditions.push('category = ?');
+      conditions.push('s.category = ?');
       params.push(filter.category);
     }
     if (filter?.scriptType) {
-      conditions.push('script_type = ?');
+      conditions.push('s.script_type = ?');
       params.push(filter.scriptType);
     }
 
     const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
-    const rows = await allAsync(`SELECT * FROM scripts ${where} ORDER BY uploaded_at DESC`, params);
+    const rows = await allAsync(
+      `SELECT s.*, u.display_name as uploader_name FROM scripts s LEFT JOIN users u ON s.uploaded_by = u.id ${where} ORDER BY s.uploaded_at DESC`,
+      params
+    );
 
     const scripts = rows.map(rowToScript);
     for (const script of scripts) {
