@@ -1,11 +1,11 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef, Fragment } from 'react';
 import { useAuthStore } from '@/stores/authStore';
 import { useScriptStore } from '@/stores/scriptStore';
 import { useDocTemplateStore } from '@/stores/docTemplateStore';
 import { getApiUrl, fetchWithAuth } from '@/services/api';
 import { canAccess } from '@/utils/permissions';
 import { Script } from '@/types';
-import { formatFileSize } from '@/utils/formatters';
+import { formatFileSize, formatDateShort } from '@/utils/formatters';
 import { ConfirmDialog } from '@/components/common/ConfirmDialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -14,7 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { SearchFilter } from '@/components/common/SearchFilter';
 import { EmptyState } from '@/components/common/EmptyState';
 import { toast } from 'sonner';
-import { Trash2, Pencil, Loader2, Check, PackageCheck, AlertCircle } from 'lucide-react';
+import { Trash2, Pencil, Loader2, Check, PackageCheck, AlertCircle, ChevronDown, ChevronRight } from 'lucide-react';
 import { AuxFileList } from './AuxFileList';
 import { InstallDepsDialog } from './InstallDepsDialog';
 import { SCRIPT_TYPE_LABELS, LOG_CATEGORY_LABELS, REGION_LIST, isDepsStatusDone } from './constants';
@@ -31,7 +31,10 @@ export function ScriptListPanel({ onEditScript }: ScriptListPanelProps) {
   const canManage = canAccess(user?.role, 'scripts');
   const [searchQuery, setSearchQuery] = useState('');
   const [regionFilter, setRegionFilter] = useState<string>('全部');
+  const [categoryFilter, setCategoryFilter] = useState<string>('全部');
   const [deleteTarget, setDeleteTarget] = useState<Script | null>(null);
+  // 辅助文件展开状态（按脚本 id）
+  const [expandedAux, setExpandedAux] = useState<Record<string, boolean>>({});
 
   // 判断当前用户是否能编辑/删除指定脚本（senior 只能操作自己区域的）
   const canEditScript = (script: Script): boolean => {
@@ -97,6 +100,10 @@ export function ScriptListPanel({ onEditScript }: ScriptListPanelProps) {
   const filteredGroups = (() => {
     let result = scriptGroups.filter((g) => {
       if (searchQuery && !g.name.toLowerCase().includes(searchQuery.toLowerCase())) return false;
+      if (categoryFilter !== '全部') {
+        const sel = getSelectedScript(g);
+        if (!sel || sel.category !== categoryFilter) return false;
+      }
       if (regionFilter !== '全部') {
         const sel = getSelectedScript(g);
         if (!sel || (sel.region || '全部') !== regionFilter) return false;
@@ -210,10 +217,45 @@ export function ScriptListPanel({ onEditScript }: ScriptListPanelProps) {
     });
   };
 
+  /** 渲染依赖状态 Badge（5 种状态分支） */
+  const renderDepsBadge = (sel: Script) => {
+    if (sel.scriptType !== 'python') return null;
+    // 当前卡片正在安装依赖
+    if (installingScriptId === sel.id) {
+      return <Badge className="text-xs bg-yellow-100 text-yellow-700 hover:bg-yellow-200 cursor-pointer" onClick={() => setShowInstallDialog(true)}><Loader2 className="h-3 w-3 mr-1 animate-spin" />正在安装依赖</Badge>;
+    }
+    const ds = sel.depsStatus;
+    const hasReqs = (sel.requirements?.length || 0) > 0;
+    // 无依赖时：venv 存在即认为已就绪
+    if (!hasReqs) {
+      if (ds?.status === 'done' || ds?.status === 'env_ready') {
+        return <Badge className="text-xs bg-green-100 text-green-700 hover:bg-green-200"><Check className="h-3 w-3 mr-1" />已就绪</Badge>;
+      }
+      return null;
+    }
+    if (!ds || ds.status === 'none') {
+      return <Badge variant="outline" className="text-xs text-muted-foreground cursor-pointer hover:bg-accent" onClick={() => handleInstallDeps(sel.id)}><PackageCheck className="h-3 w-3 mr-1" />环境及依赖未就绪</Badge>;
+    }
+    if (ds.status === 'env_ready') {
+      return <Badge variant="outline" className="text-xs text-orange-600 border-orange-200 bg-orange-50 cursor-pointer hover:bg-orange-100" onClick={() => handleInstallDeps(sel.id)}><PackageCheck className="h-3 w-3 mr-1" />依赖未就绪</Badge>;
+    }
+    if (ds.status === 'installing') return <Badge className="text-xs bg-yellow-100 text-yellow-700 hover:bg-yellow-200 cursor-pointer" onClick={() => setShowInstallDialog(true)}><Loader2 className="h-3 w-3 mr-1 animate-spin" />正在安装依赖</Badge>;
+    if (isDepsStatusDone(ds.status)) return <Badge className="text-xs bg-green-100 text-green-700 hover:bg-green-200"><Check className="h-3 w-3 mr-1" />已就绪</Badge>;
+    if (ds.status === 'failed') return <Badge variant="destructive" className="text-xs cursor-pointer" onClick={() => handleInstallDeps(sel.id)}><AlertCircle className="h-3 w-3 mr-1" />安装失败</Badge>;
+    return null;
+  };
+
   return (
     <>
       <div className="flex items-center gap-3">
-        <SearchFilter value={searchQuery} onChange={setSearchQuery} placeholder="搜索脚本名称..." />
+        <SearchFilter value={searchQuery} onChange={setSearchQuery} placeholder="搜索脚本名称..." className="flex-1 max-w-sm" />
+        <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+          <SelectTrigger className="w-28 h-9 text-sm"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="全部">全部分类</SelectItem>
+            {Object.entries(LOG_CATEGORY_LABELS).map(([k, label]) => (<SelectItem key={k} value={k}>{label}</SelectItem>))}
+          </SelectContent>
+        </Select>
         <Select value={regionFilter} onValueChange={setRegionFilter}>
           <SelectTrigger className="w-32 h-9 text-sm"><SelectValue /></SelectTrigger>
           <SelectContent>{REGION_LIST.map((r) => (<SelectItem key={r} value={r}>{r}</SelectItem>))}</SelectContent>
@@ -222,83 +264,91 @@ export function ScriptListPanel({ onEditScript }: ScriptListPanelProps) {
       {filteredGroups.length === 0 ? (
         <EmptyState title="暂无脚本" description="点击右上角「上传脚本」开始使用" />
       ) : (
-        <div className="space-y-3">
+        <div className="space-y-2">
           {filteredGroups.map((group) => {
             const sel = getSelectedScript(group);
             if (!sel) return null;
             const linkedTpls = docTemplates.filter((t) => sel.templateIds.includes(t.id));
+            // 元信息行：Python 版本 · 入口文件+大小 · 上传日期 · 上传者
+            const metaItems: string[] = [];
+            if (sel.scriptType === 'python' && sel.pythonVersion && sel.pythonVersion !== 'embedded') {
+              metaItems.push(`Python ${sel.pythonVersion}`);
+            }
+            metaItems.push(`${sel.fileName}（${formatFileSize(sel.fileSize)}）${sel.isMultiFile ? ' · 多文件' : ''}`);
+            metaItems.push(formatDateShort(sel.uploadedAt));
+            if (sel.uploadedBy) metaItems.push(sel.uploadedBy);
             return (
               <Card key={group.name}>
-                <CardContent className="p-4">
-                  <div className="flex items-center justify-between">
-                    <div className="flex-1 min-w-0">
-                      <div className="font-semibold text-lg truncate">{group.name}</div>
-                      <div className="flex items-center gap-2 flex-wrap mt-1">
-                        <Badge variant="secondary">{SCRIPT_TYPE_LABELS[sel.scriptType]}</Badge>
-                        <Badge variant="outline">{LOG_CATEGORY_LABELS[sel.category]}</Badge>
-                        {sel.region && sel.region !== '全部' && <Badge variant="outline" className="text-xs">{sel.region}</Badge>}
-                        {sel.scriptType === 'python' && (
-                          (() => {
-                            // 当前卡片正在安装依赖
-                            if (installingScriptId === sel.id) {
-                              return <Badge className="text-xs bg-yellow-100 text-yellow-700 hover:bg-yellow-200 cursor-pointer" onClick={() => setShowInstallDialog(true)}><Loader2 className="h-3 w-3 mr-1 animate-spin" />正在安装依赖</Badge>;
-                            }
-                            const ds = sel.depsStatus;
-                            const hasReqs = (sel.requirements?.length || 0) > 0;
-                            // 无依赖时：venv 存在即认为已就绪
-                            if (!hasReqs) {
-                              if (ds?.status === 'done' || ds?.status === 'env_ready') {
-                                return <Badge className="text-xs bg-green-100 text-green-700 hover:bg-green-200"><Check className="h-3 w-3 mr-1" />已就绪</Badge>;
-                              }
-                              return null;
-                            }
-                            if (!ds || ds.status === 'none') {
-                              return <Badge variant="outline" className="text-xs text-muted-foreground cursor-pointer hover:bg-accent" onClick={() => handleInstallDeps(sel.id)}><PackageCheck className="h-3 w-3 mr-1" />环境及依赖未就绪</Badge>;
-                            }
-                            if (ds.status === 'env_ready') {
-                              return <Badge variant="outline" className="text-xs text-orange-600 border-orange-200 bg-orange-50 cursor-pointer hover:bg-orange-100" onClick={() => handleInstallDeps(sel.id)}><PackageCheck className="h-3 w-3 mr-1" />依赖未就绪</Badge>;
-                            }
-                            if (ds.status === 'installing') return <Badge className="text-xs bg-yellow-100 text-yellow-700 hover:bg-yellow-200 cursor-pointer" onClick={() => setShowInstallDialog(true)}><Loader2 className="h-3 w-3 mr-1 animate-spin" />正在安装依赖</Badge>;
-                            if (isDepsStatusDone(ds.status)) return <Badge className="text-xs bg-green-100 text-green-700 hover:bg-green-200"><Check className="h-3 w-3 mr-1" />已就绪</Badge>;
-                            if (ds.status === 'failed') return <Badge variant="destructive" className="text-xs cursor-pointer" onClick={() => handleInstallDeps(sel.id)}><AlertCircle className="h-3 w-3 mr-1" />安装失败</Badge>;
-                            return null;
-                          })()
-                        )}
-                        {sel.templateRequired && linkedTpls.length > 0 && linkedTpls.map((t) => (
-                          <Badge key={t.id} variant="secondary" className="text-xs">模板：{t.name}</Badge>
-                        ))}
-                      </div>
-                      <p className="text-xs text-muted-foreground mt-1">
-                        脚本运行入口：{sel.fileName} · {formatFileSize(sel.fileSize)}
-                        {sel.isMultiFile ? ' (存在多个脚本文件)' : ''}
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-2 ml-4">
-                      {group.items.length > 1 && (
+                <CardContent className="p-3">
+                  {/* 头部行：名称+版本 | 类型/分类/区域/依赖状态 */}
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <span className="font-semibold text-base truncate">{group.name}</span>
+                      {group.items.length > 1 ? (
                         <Select value={sel.id} onValueChange={(v) => setVersionSelections({ ...versionSelections, [group.name]: v })}>
-                          <SelectTrigger className="w-28 h-8 text-xs"><SelectValue /></SelectTrigger>
+                          <SelectTrigger className="h-6 w-auto gap-1 border-none bg-transparent p-0 text-sm text-muted-foreground hover:text-foreground shadow-none">
+                            <SelectValue />
+                          </SelectTrigger>
                           <SelectContent>
                             {group.items.map((s) => (
                               <SelectItem key={s.id} value={s.id}>v{s.version}</SelectItem>
                             ))}
                           </SelectContent>
                         </Select>
-                      )}
-                      {group.items.length === 1 && (
-                        <Badge variant="secondary" className="text-xs">v{sel.version}</Badge>
-                      )}
-                      {canEditScript(sel) && (
-                        <>
-                          <Button variant="ghost" size="icon" onClick={() => onEditScript(sel)}><Pencil className="h-4 w-4" /></Button>
-                          <Button variant="ghost" size="icon" onClick={() => setDeleteTarget(sel)}><Trash2 className="h-4 w-4" /></Button>
-                        </>
+                      ) : (
+                        <span className="text-sm text-muted-foreground shrink-0">v{sel.version}</span>
                       )}
                     </div>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <Badge variant="secondary">{SCRIPT_TYPE_LABELS[sel.scriptType]}</Badge>
+                      <Badge variant="outline">{LOG_CATEGORY_LABELS[sel.category]}</Badge>
+                      {sel.region && sel.region !== '全部' && <Badge variant="outline" className="text-xs">{sel.region}</Badge>}
+                      {renderDepsBadge(sel)}
+                    </div>
                   </div>
-                  {/* Aux files display */}
+                  {/* 描述行（可选，一行截断） */}
+                  {sel.description && (
+                    <p className="text-sm text-muted-foreground truncate mt-1">{sel.description}</p>
+                  )}
+                  {/* 元信息行 */}
+                  <div className="flex items-center gap-1.5 text-xs text-muted-foreground flex-wrap mt-1">
+                    {metaItems.map((item, i) => (
+                      <Fragment key={i}>
+                        {i > 0 && <span className="text-muted-foreground/50">·</span>}
+                        <span>{item}</span>
+                      </Fragment>
+                    ))}
+                  </div>
+                  {/* 关联模板 Badge 行（可选） */}
+                  {sel.templateRequired && linkedTpls.length > 0 && (
+                    <div className="flex items-center gap-1 flex-wrap mt-1.5">
+                      {linkedTpls.map((t) => (
+                        <Badge key={t.id} variant="secondary" className="text-xs">模板：{t.name}</Badge>
+                      ))}
+                    </div>
+                  )}
+                  {/* 辅助文件（折叠式，默认收起） */}
                   {sel.auxiliaryFiles.length > 0 && (
-                    <div className="mt-3 pt-3 border-t">
-                      <AuxFileList files={sel.auxiliaryFiles} />
+                    <div className="mt-2">
+                      <button
+                        className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+                        onClick={() => setExpandedAux((prev) => ({ ...prev, [sel.id]: !prev[sel.id] }))}
+                      >
+                        {expandedAux[sel.id] ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                        辅助文件（{sel.auxiliaryFiles.length}）
+                      </button>
+                      {expandedAux[sel.id] && (
+                        <div className="mt-2">
+                          <AuxFileList files={sel.auxiliaryFiles} />
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {/* 操作按钮：固定右下 */}
+                  {canEditScript(sel) && (
+                    <div className="flex justify-end gap-1 mt-2">
+                      <Button variant="ghost" size="icon" onClick={() => onEditScript(sel)}><Pencil className="h-4 w-4" /></Button>
+                      <Button variant="ghost" size="icon" onClick={() => setDeleteTarget(sel)}><Trash2 className="h-4 w-4" /></Button>
                     </div>
                   )}
                 </CardContent>
