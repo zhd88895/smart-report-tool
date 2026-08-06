@@ -13,8 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { SearchFilter } from '@/components/common/SearchFilter';
 import { EmptyState } from '@/components/common/EmptyState';
 import { toast } from 'sonner';
-import { Loader2, Check, PackageCheck, AlertCircle, ChevronDown, ChevronRight, Download } from 'lucide-react';
-import { AuxFileList } from './AuxFileList';
+import { Loader2, Check, PackageCheck, AlertCircle, Download } from 'lucide-react';
 import { InstallDepsDialog } from './InstallDepsDialog';
 import { SCRIPT_TYPE_LABELS, LOG_CATEGORY_LABELS, REGION_LIST, isDepsStatusDone } from './constants';
 
@@ -31,8 +30,6 @@ export function ScriptListPanel({ onEditScript }: ScriptListPanelProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [regionFilter, setRegionFilter] = useState<string>('全部');
   const [categoryFilter, setCategoryFilter] = useState<string>('全部');
-  // 辅助文件展开状态（按脚本 id）
-  const [expandedAux, setExpandedAux] = useState<Record<string, boolean>>({});
 
   // 判断当前用户是否能编辑/删除指定脚本（senior 只能操作自己区域的）
   const canEditScript = (script: Script): boolean => {
@@ -296,13 +293,18 @@ export function ScriptListPanel({ onEditScript }: ScriptListPanelProps) {
             return (
               <Card key={group.name} className={canEditScript(sel) ? 'cursor-pointer hover:shadow-md hover:border-primary/30 transition-all' : ''} onClick={() => { if (canEditScript(sel)) onEditScript(sel); }}>
                 <CardContent className="p-3">
-                  {/* 头部行：名称+版本 | 类型/分类/区域/依赖状态 */}
+                  {/* 头部行：名称+关联模板 | 版本/类型/分类/区域/依赖状态 */}
                   <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-1.5 min-w-0">
+                    <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
                       <span className="font-semibold text-base truncate">{group.name}</span>
+                      {sel.templateRequired && linkedTpls.map((t) => (
+                        <Badge key={t.id} variant="secondary" className="text-xs">模板：{t.name}</Badge>
+                      ))}
+                    </div>
+                    <div className="flex items-center gap-1.5 shrink-0">
                       {group.items.length > 1 ? (
                         <Select value={sel.id} onValueChange={(v) => setVersionSelections({ ...versionSelections, [group.name]: v })}>
-                          <SelectTrigger className="h-6 w-auto gap-1 border-none bg-transparent p-0 text-sm text-muted-foreground hover:text-foreground shadow-none" onClick={(e) => e.stopPropagation()}>
+                          <SelectTrigger className="h-6 w-auto gap-1 rounded-full border bg-background px-2.5 py-0.5 text-xs font-semibold text-foreground shadow-none" onClick={(e) => e.stopPropagation()}>
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
@@ -312,12 +314,10 @@ export function ScriptListPanel({ onEditScript }: ScriptListPanelProps) {
                           </SelectContent>
                         </Select>
                       ) : (
-                        <span className="text-sm text-muted-foreground shrink-0">v{sel.version}</span>
+                        <Badge variant="outline" className="text-xs">v{sel.version}</Badge>
                       )}
-                    </div>
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      <Badge variant="secondary">{SCRIPT_TYPE_LABELS[sel.scriptType]}</Badge>
-                      <Badge variant="outline">{LOG_CATEGORY_LABELS[sel.category]}</Badge>
+                      <Badge variant="secondary" className="text-xs">{SCRIPT_TYPE_LABELS[sel.scriptType]}</Badge>
+                      <Badge variant="outline" className="text-xs">{LOG_CATEGORY_LABELS[sel.category]}</Badge>
                       {sel.region && sel.region !== '全部' && <Badge variant="outline" className="text-xs">{sel.region}</Badge>}
                       {renderDepsBadge(sel)}
                     </div>
@@ -354,31 +354,6 @@ export function ScriptListPanel({ onEditScript }: ScriptListPanelProps) {
                       </Button>
                     )}
                   </div>
-                  {/* 关联模板 Badge 行（可选） */}
-                  {sel.templateRequired && linkedTpls.length > 0 && (
-                    <div className="flex items-center gap-1 flex-wrap mt-1.5">
-                      {linkedTpls.map((t) => (
-                        <Badge key={t.id} variant="secondary" className="text-xs">模板：{t.name}</Badge>
-                      ))}
-                    </div>
-                  )}
-                  {/* 辅助文件（折叠式，默认收起） */}
-                  {sel.auxiliaryFiles.length > 0 && (
-                    <div className="mt-2">
-                      <button
-                        className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
-                        onClick={(e) => { e.stopPropagation(); setExpandedAux((prev) => ({ ...prev, [sel.id]: !prev[sel.id] })); }}
-                      >
-                        {expandedAux[sel.id] ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-                        辅助文件（{sel.auxiliaryFiles.length}）
-                      </button>
-                      {expandedAux[sel.id] && (
-                        <div className="mt-2">
-                          <AuxFileList files={sel.auxiliaryFiles} />
-                        </div>
-                      )}
-                    </div>
-                  )}
                 </CardContent>
               </Card>
             );
