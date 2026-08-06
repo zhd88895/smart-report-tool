@@ -19,15 +19,13 @@ import { Textarea } from '@/components/ui/textarea';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog';
-import {
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
-} from '@/components/ui/table';
 import { toast } from 'sonner';
 import {
   FolderPlus, Upload, Search, Trash2, Edit, FileText, FileCode,
   Archive, RefreshCw, Folder, AlertCircle, Check, Download,
 } from 'lucide-react';
 import { ConfirmDialog } from '@/components/common/ConfirmDialog';
+import { DataTable } from '@/components/common/DataTable';
 import { EmptyState } from '@/components/common/EmptyState';
 import { LoadingSpinner } from '@/components/common/LoadingSpinner';
 import { cn } from '@/lib/utils';
@@ -283,6 +281,110 @@ export default function KnowledgeBasePage() {
     finally { setLoading(false); }
   };
 
+  // ── 文件列表列定义（DataTable，内置排序 + 列宽/显隐持久化） ──
+
+  const fileColumns = [
+    {
+      key: 'icon',
+      header: '',
+      width: '40px',
+      sortable: false,
+      hideable: false,
+      render: (file: KBFile) => getFileIcon(file.file_ext),
+    },
+    {
+      key: 'title',
+      header: '标题',
+      sortable: true,
+      flex: true,
+      render: (file: KBFile) => <span className="font-medium block truncate">{file.title}</span>,
+    },
+    {
+      key: 'file_name',
+      header: '文件名',
+      sortable: true,
+      flex: true,
+      render: (file: KBFile) => (
+        <span className="text-sm text-muted-foreground block truncate">{file.file_name}</span>
+      ),
+    },
+    {
+      key: 'file_size',
+      header: '大小',
+      sortable: true,
+      sortValue: (file: KBFile) => file.file_size,
+      render: (file: KBFile) => <span className="text-sm">{formatFileSize(file.file_size)}</span>,
+    },
+    {
+      key: 'status',
+      header: '状态',
+      sortable: true,
+      sortValue: (file: KBFile) => file.status,
+      render: (file: KBFile) => (
+        file.status === 'ready' ? (
+          <Badge variant="default" className="text-xs">
+            <Check className="h-3 w-3 mr-1" />就绪
+          </Badge>
+        ) : file.status === 'error' ? (
+          <Badge variant="destructive" className="text-xs">
+            <AlertCircle className="h-3 w-3 mr-1" />解析失败
+          </Badge>
+        ) : (
+          <Badge variant="secondary" className="text-xs">{file.status}</Badge>
+        )
+      ),
+    },
+    {
+      key: 'created_at',
+      header: '上传时间',
+      sortable: true,
+      sortValue: (file: KBFile) => file.created_at,
+      render: (file: KBFile) => (
+        <span className="text-sm text-muted-foreground">
+          {new Date(file.created_at).toLocaleDateString()}
+        </span>
+      ),
+    },
+    {
+      key: 'actions',
+      header: '操作',
+      width: '120px',
+      sortable: false,
+      hideable: false,
+      render: (file: KBFile) => (
+        <div className="flex gap-1 justify-end">
+          {file.status === 'error' && (
+            <Button
+              variant="ghost" size="icon"
+              className="h-8 w-8"
+              title="重新解析"
+              disabled={reparsingId === file.id}
+              onClick={() => reparseFile(file)}
+            >
+              <RefreshCw className={cn('h-4 w-4', reparsingId === file.id && 'animate-spin')} />
+            </Button>
+          )}
+          <Button
+            variant="ghost" size="icon"
+            className="h-8 w-8"
+            title="下载文件"
+            onClick={() => downloadKbFile(file)}
+          >
+            <Download className="h-4 w-4" />
+          </Button>
+          <Button
+            variant="ghost" size="icon"
+            className="h-8 w-8 text-destructive hover:text-destructive"
+            title="删除文件"
+            onClick={() => deleteFile(file)}
+          >
+            <Trash2 className="h-4 w-4" />
+          </Button>
+        </div>
+      ),
+    },
+  ];
+
   // ── 渲染 ──
 
   return (
@@ -374,83 +476,19 @@ export default function KnowledgeBasePage() {
 
           {/* 文件列表 */}
           <Card>
-            <CardContent className="p-0">
+            <CardContent className={files.length === 0 ? 'p-0' : 'p-4'}>
               {files.length === 0 ? (
                 <EmptyState
                   title="暂无文件"
                   description="点击「上传文件」导入知识库内容，支持 Markdown、HTML、Word、PDF、TXT 格式"
                 />
               ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className="w-[40px]"></TableHead>
-                      <TableHead>标题</TableHead>
-                      <TableHead>文件名</TableHead>
-                      <TableHead>大小</TableHead>
-                      <TableHead>状态</TableHead>
-                      <TableHead>上传时间</TableHead>
-                      <TableHead className="text-right">操作</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {files.map((file) => (
-                      <TableRow key={file.id}>
-                        <TableCell>{getFileIcon(file.file_ext)}</TableCell>
-                        <TableCell className="font-medium">{file.title}</TableCell>
-                        <TableCell className="text-sm text-muted-foreground max-w-[200px] truncate">
-                          {file.file_name}
-                        </TableCell>
-                        <TableCell className="text-sm">{formatFileSize(file.file_size)}</TableCell>
-                        <TableCell>
-                          {file.status === 'ready' ? (
-                            <Badge variant="default" className="text-xs">
-                              <Check className="h-3 w-3 mr-1" />就绪
-                            </Badge>
-                          ) : file.status === 'error' ? (
-                            <Badge variant="destructive" className="text-xs">
-                              <AlertCircle className="h-3 w-3 mr-1" />解析失败
-                            </Badge>
-                          ) : (
-                            <Badge variant="secondary" className="text-xs">{file.status}</Badge>
-                          )}
-                        </TableCell>
-                        <TableCell className="text-sm text-muted-foreground">
-                          {new Date(file.created_at).toLocaleDateString()}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          {file.status === 'error' && (
-                            <Button
-                              variant="ghost" size="icon"
-                              className="h-8 w-8"
-                              title="重新解析"
-                              disabled={reparsingId === file.id}
-                              onClick={() => reparseFile(file)}
-                            >
-                              <RefreshCw className={cn('h-4 w-4', reparsingId === file.id && 'animate-spin')} />
-                            </Button>
-                          )}
-                          <Button
-                            variant="ghost" size="icon"
-                            className="h-8 w-8"
-                            title="下载文件"
-                            onClick={() => downloadKbFile(file)}
-                          >
-                            <Download className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            variant="ghost" size="icon"
-                            className="h-8 w-8 text-destructive hover:text-destructive"
-                            title="删除文件"
-                            onClick={() => deleteFile(file)}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
+                <DataTable
+                  columns={fileColumns}
+                  data={files}
+                  keyExtractor={(file) => file.id}
+                  tableId="kb-files"
+                />
               )}
             </CardContent>
           </Card>

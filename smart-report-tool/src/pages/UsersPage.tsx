@@ -193,6 +193,7 @@ export default function UsersPage() {
     {
       key: 'actions',
       header: '操作',
+      hideable: false,
       render: (item: User) => (
         item.id === currentUser?.id ? null : (
           <div className="flex gap-1">
@@ -218,6 +219,7 @@ export default function UsersPage() {
     {
       key: 'actions',
       header: '操作',
+      hideable: false,
       render: (item: User) => (
         <div className="flex gap-1">
           <Button variant="ghost" size="icon" className="h-8 w-8" title="批准" onClick={() => handleApprove(item.id)}>
@@ -311,7 +313,7 @@ export default function UsersPage() {
                   </Select>
                 </div>
               </div>
-              <DataTable columns={allColumns} data={filteredUsers} keyExtractor={(item) => item.id} />
+              <DataTable columns={allColumns} data={filteredUsers} keyExtractor={(item) => item.id} tableId="users-all" />
             </CardContent>
           </Card>
         </TabsContent>
@@ -319,7 +321,7 @@ export default function UsersPage() {
           <Card>
             <CardHeader className="pb-2"><CardTitle className="text-base">待审核用户</CardTitle></CardHeader>
             <CardContent>
-              <DataTable columns={pendingColumns} data={pendingUsers} keyExtractor={(item) => item.id} />
+              <DataTable columns={pendingColumns} data={pendingUsers} keyExtractor={(item) => item.id} tableId="users-pending" />
             </CardContent>
           </Card>
         </TabsContent>

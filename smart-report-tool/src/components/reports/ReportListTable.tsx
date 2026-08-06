@@ -20,6 +20,8 @@ export interface ReportListTableProps {
   onViewLogs: (report: Report) => void;
   onViewFiles: (report: Report) => void;
   onDelete: (report: Report) => void;
+  /** 表格标识：传入后启用列宽拖拽/列显隐并持久化（AI/脚本 Tab 由调用方区分） */
+  tableId?: string;
 }
 
 /** 报告管理页列表卡片：列定义 + DataTable */
@@ -32,6 +34,7 @@ export function ReportListTable({
   onViewLogs,
   onViewFiles,
   onDelete,
+  tableId,
 }: ReportListTableProps) {
   const columns = [
     {
@@ -58,6 +61,7 @@ export function ReportListTable({
       key: 'actions',
       header: '操作',
       width: '120px',
+      hideable: false,
       render: (item: Report) => {
         const isAI = (item.reportSource || 'script') === 'ai';
         return (
@@ -86,7 +90,7 @@ export function ReportListTable({
         <CardTitle className="text-base">报告列表</CardTitle>
       </CardHeader>
       <CardContent>
-        <DataTable columns={columns} data={reports} keyExtractor={(item) => item.id} sortKey={sortKey} sortDir={sortDir} onSortChange={onSortChange} />
+        <DataTable columns={columns} data={reports} keyExtractor={(item) => item.id} sortKey={sortKey} sortDir={sortDir} onSortChange={onSortChange} tableId={tableId} />
       </CardContent>
     </Card>
   );

@@ -289,6 +289,7 @@ export default function ReportsPage() {
         onViewLogs={fetchLogs}
         onViewFiles={fetchReportFiles}
         onDelete={setDeleteTarget}
+        tableId={`report-list-${activeTab}`}
       />
 
       {/* 删除确认 */}

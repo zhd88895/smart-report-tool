@@ -87,6 +87,7 @@ export function ConversationRecordsPanel() {
     {
       key: 'actions',
       header: '操作',
+      hideable: false,
       render: (item: Conversation) => (
         <Button
           variant="ghost" size="icon"
@@ -127,7 +128,7 @@ export function ConversationRecordsPanel() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <DataTable columns={columns} data={conversations} keyExtractor={(item) => item.id} />
+          <DataTable columns={columns} data={conversations} keyExtractor={(item) => item.id} tableId="conversation-records" />
           <p className="mt-3 text-xs text-muted-foreground">
             仅展示当前账号的对话；Token 用量自功能上线起统计，历史对话显示为「—」。
           </p>
