@@ -283,7 +283,7 @@ export function DataTable<T>({ columns, data, rowKey, keyExtractor, pageSize = 1
                 <TableHead
                   key={col.key}
                   style={tableId ? { width: widths[col.key] ?? baseWidth(col) } : { width: col.width }}
-                  className={tableId ? 'relative group' : undefined}
+                  className={tableId ? 'relative group border-r border-border last:border-r-0' : undefined}
                 >
                   {col.sortable ? (
                     <button
@@ -322,7 +322,7 @@ export function DataTable<T>({ columns, data, rowKey, keyExtractor, pageSize = 1
             {pageData.map((row, index) => (
               <TableRow key={getKey(row, index)}>
                 {visibleColumns.map((col) => (
-                  <TableCell key={col.key}>
+                  <TableCell key={col.key} className={tableId ? 'border-r border-border/60 last:border-r-0' : undefined}>
                     {col.render ? col.render(row) : (row as unknown as Record<string, React.ReactNode>)[col.key]}
                   </TableCell>
                 ))}

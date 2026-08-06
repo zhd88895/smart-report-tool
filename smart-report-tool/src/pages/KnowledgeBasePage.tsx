@@ -285,19 +285,16 @@ export default function KnowledgeBasePage() {
 
   const fileColumns = [
     {
-      key: 'icon',
-      header: '',
-      width: '40px',
-      sortable: false,
-      hideable: false,
-      render: (file: KBFile) => getFileIcon(file.file_ext),
-    },
-    {
       key: 'title',
       header: '标题',
       sortable: true,
       flex: true,
-      render: (file: KBFile) => <span className="font-medium block truncate">{file.title}</span>,
+      render: (file: KBFile) => (
+        <span className="flex items-center gap-2 min-w-0">
+          <span className="shrink-0">{getFileIcon(file.file_ext)}</span>
+          <span className="font-medium truncate">{file.title}</span>
+        </span>
+      ),
     },
     {
       key: 'file_name',
