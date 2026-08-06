@@ -149,6 +149,7 @@ function getUpload(): multer.Multer {
 
 const MAX_AUX_FILES = 100;
 const MAX_INPUT_FILES = 50;
+const MAX_TOOL_FILES = 20;
 
 const SCRIPT_FIELDS = [
   { name: 'scriptFile', maxCount: 1 },
@@ -160,6 +161,8 @@ const SCRIPT_FIELDS = [
     name: `auxFile${i}`,
     maxCount: 1,
   })),
+  // 巡检工具文件：同一字段名多文件，不限扩展名（仅做文件名安全校验）
+  { name: 'tools', maxCount: MAX_TOOL_FILES },
 ];
 
 const REPORT_INPUT_FIELDS = Array.from({ length: MAX_INPUT_FILES }, (_, i) => ({
@@ -172,6 +175,7 @@ const REPORT_INPUT_FIELDS = Array.from({ length: MAX_INPUT_FILES }, (_, i) => ({
  * 主文件字段：scriptFile
  * 额外多文件：scriptFile1, scriptFile2, ...
  * 辅助文件字段：auxFile0, auxFile1, ...
+ * 巡检工具文件字段：tools（同名字段多文件，最多 20 个）
  */
 export const uploadScriptFiles: RequestHandler = (req, res, next) =>
   getUpload().fields(SCRIPT_FIELDS)(req, res, next);

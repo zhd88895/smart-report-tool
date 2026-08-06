@@ -15,6 +15,10 @@ import { settingsService } from '../services/settingsService';
 import { fileManager } from '../utils/file';
 import { ApiResponse, safeErrorMessage } from '../types';
 import { existsSync, createReadStream } from 'fs';
+import fs from 'fs/promises';
+import path from 'path';
+import * as tar from 'tar';
+import { SCRIPTS_DIR, UPLOADS_DIR } from '../config';
 
 /**
  * 脚本路由类
@@ -76,6 +80,13 @@ export class ScriptRoutes {
       '/:id/download',
       authenticate,
       this.downloadScript.bind(this)
+    );
+
+    // 一键下载脚本的全部巡检工具（tar.gz 打包，所有登录用户可下载）
+    this.router.get(
+      '/:id/tools-download',
+      authenticate,
+      this.downloadTools.bind(this)
     );
   }
 
@@ -179,6 +190,26 @@ export class ScriptRoutes {
         });
       }
 
+      // 收集并校验巡检工具文件（multipart 字段名 tools，可多文件，不限扩展名）
+      const toolFiles: Array<{
+        filename: string;
+        path: string;
+        size: number;
+      }> = [];
+      for (const tool of files?.['tools'] || []) {
+        if (tool.size > maxFileSizeBytes) {
+          throw new Error(`巡检工具文件 ${tool.originalname} 超过 ${uploadLimitMB}MB 限制`);
+        }
+        if (!fileManager.validateFileName(tool.originalname)) {
+          throw new Error(`巡检工具文件名无效: ${tool.originalname}`);
+        }
+        toolFiles.push({
+          filename: tool.originalname,
+          path: tool.path,
+          size: tool.size,
+        });
+      }
+
       // 多文件模式：收集额外的 .py 脚本文件（scriptFile1, scriptFile2, ...）
       const extraScriptFiles: Array<{
         filename: string;
@@ -231,6 +262,7 @@ export class ScriptRoutes {
           isMultiFile,
           reportNameTemplate: body.reportNameTemplate,
           auxiliaryFiles,
+          toolFiles,
         },
         extraScriptFiles.length > 0 ? extraScriptFiles : undefined
       );
@@ -312,6 +344,12 @@ export class ScriptRoutes {
         await scriptService.addAuxiliaryFiles(id, auxFiles);
       }
 
+      // 5. 处理新上传的巡检工具文件
+      const toolFiles = this.collectToolFiles(files);
+      if (toolFiles.length > 0) {
+        await scriptService.addToolFiles(id, toolFiles);
+      }
+
       const updatedScript = await scriptService.getScript(id);
 
       const response: ApiResponse<typeof updatedScript> = {
@@ -366,6 +404,32 @@ export class ScriptRoutes {
   }
 
   /**
+   * 从 multer files 中提取巡检工具文件列表（字段名 tools，不限扩展名）
+   */
+  private collectToolFiles(
+    files: { [fieldname: string]: Express.Multer.File[] } | undefined
+  ): Array<{ filename: string; path: string; size: number }> {
+    if (!files) return [];
+
+    const result: Array<{ filename: string; path: string; size: number }> = [];
+    const uploadLimitMB = settingsService.getNumber('storage.uploadLimit', 50);
+    for (const tool of files['tools'] || []) {
+      if (tool.size > uploadLimitMB * 1024 * 1024) {
+        throw new Error(`巡检工具文件 ${tool.originalname} 超过 ${uploadLimitMB}MB 限制`);
+      }
+      if (!fileManager.validateFileName(tool.originalname)) {
+        throw new Error(`巡检工具文件名无效: ${tool.originalname}`);
+      }
+      result.push({
+        filename: tool.originalname,
+        path: tool.path,
+        size: tool.size,
+      });
+    }
+    return result;
+  }
+
+  /**
    * 将 multipart 表单的字符串字段解析为更新数据对象
    * multer 将 multipart 的文本字段解析为字符串，需要手动转换布尔/JSON 类型
    */
@@ -391,6 +455,9 @@ export class ScriptRoutes {
     }
     if (body.existingAux) {
       data.auxiliaryFiles = JSON.parse(body.existingAux);
+    }
+    if (body.existingTools) {
+      data.toolFiles = JSON.parse(body.existingTools);
     }
     return data;
   }
@@ -607,6 +674,73 @@ export class ScriptRoutes {
         code: 400,
         data: null,
         message: '下载脚本失败',
+        error: safeErrorMessage(error),
+      };
+      res.status(400).json(response);
+    }
+  }
+
+  /**
+   * 一键下载脚本的全部巡检工具（tar.gz）
+   *
+   * 将 data/scripts/{scriptId}/tools/ 目录打包为 tar.gz 流式返回。
+   * 所有登录用户均可下载（巡检工具面向一线工程师）。
+   *
+   * @param req - Express请求对象
+   * @param res - Express响应对象
+   */
+  private async downloadTools(req: Request, res: Response): Promise<void> {
+    try {
+      const id = req.params.id as string;
+
+      const script = await scriptService.getScript(id);
+
+      const toolsDir = path.join(SCRIPTS_DIR, id, 'tools');
+      const existing = (script.toolFiles || []).filter((f) => existsSync(f.path));
+      if (!existsSync(toolsDir) || existing.length === 0) {
+        res.status(404).json({
+          code: 404,
+          data: null,
+          message: '该脚本暂无巡检工具文件',
+        });
+        return;
+      }
+
+      // 下载文件名：{脚本名}_巡检工具_{YYYYMMDD}.tar.gz（脚本名清理文件系统不安全字符）
+      const now = new Date();
+      const p = (n: number) => String(n).padStart(2, '0');
+      const dateStr = `${now.getFullYear()}${p(now.getMonth() + 1)}${p(now.getDate())}`;
+      const safeName = (script.name || '')
+        .replace(/[\/\\:*?"<>|\x00-\x1f]/g, '_')
+        .trim()
+        .replace(/^\.+/, '') || 'script';
+      const downloadName = `${safeName}_巡检工具_${dateStr}.tar.gz`;
+
+      // 先打包到临时文件，再流式返回（与报告批量下载的 tar.create 用法一致）
+      const archivePath = path.join(UPLOADS_DIR, `tools_${id}_${Date.now()}.tar.gz`);
+      await tar.create(
+        { gzip: true, file: archivePath, cwd: toolsDir },
+        existing.map((f) => f.name)
+      );
+
+      // 同时提供 ASCII fallback 和 RFC 5987 UTF-8 编码（中文文件名）
+      const encodedName = encodeURIComponent(downloadName).replace(/'/g, "%27");
+      const asciiName = downloadName.replace(/[^\x20-\x7E]/g, '?').replace(/"/g, '');
+      res.setHeader('Content-Disposition', `attachment; filename="${asciiName || 'tools.tar.gz'}"; filename*=UTF-8''${encodedName}`);
+      res.setHeader('Content-Type', 'application/gzip');
+
+      const cleanup = () => { fs.unlink(archivePath).catch(() => {}); };
+      res.on('finish', cleanup);
+      res.on('close', cleanup);
+
+      const fileStream = createReadStream(archivePath);
+      fileStream.on('error', cleanup);
+      fileStream.pipe(res);
+    } catch (error: any) {
+      const response: ApiResponse<null> = {
+        code: 400,
+        data: null,
+        message: '下载巡检工具失败',
         error: safeErrorMessage(error),
       };
       res.status(400).json(response);

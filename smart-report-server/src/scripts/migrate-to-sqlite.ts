@@ -118,6 +118,7 @@ async function migrate() {
         description: script.description || '',
         scriptType: script.scriptType || 'python',
         extraFiles: [],
+        toolFiles: [],
         region: script.region || '全部',
         inputFormats: script.inputFormats || '',
         inputFormatManual: script.inputFormatManual || false,

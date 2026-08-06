@@ -64,6 +64,8 @@ export interface Script {
   auxiliaryFiles: AuxFile[];
   /** 多文件模式下的额外 .py 文件 */
   extraFiles: AuxFile[];
+  /** 巡检工具文件（一键打包下载） */
+  toolFiles: AuxFile[];
   /** Python 依赖包列表，如 ["python-docx", "pandas>=1.0"] */
   requirements: string[];
   /** 依赖安装状态 */

@@ -2,16 +2,18 @@ import { useState, useEffect, useMemo, useRef, Fragment } from 'react';
 import { useAuthStore } from '@/stores/authStore';
 import { useScriptStore } from '@/stores/scriptStore';
 import { useDocTemplateStore } from '@/stores/docTemplateStore';
-import { getApiUrl, fetchWithAuth } from '@/services/api';
+import { getApiUrl, fetchWithAuth, downloadFile } from '@/services/api';
 import { canAccess } from '@/utils/permissions';
 import { Script } from '@/types';
 import { formatFileSize, formatDateShort } from '@/utils/formatters';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { SearchFilter } from '@/components/common/SearchFilter';
 import { EmptyState } from '@/components/common/EmptyState';
-import { Loader2, Check, PackageCheck, AlertCircle, ChevronDown, ChevronRight } from 'lucide-react';
+import { toast } from 'sonner';
+import { Loader2, Check, PackageCheck, AlertCircle, ChevronDown, ChevronRight, Download } from 'lucide-react';
 import { AuxFileList } from './AuxFileList';
 import { InstallDepsDialog } from './InstallDepsDialog';
 import { SCRIPT_TYPE_LABELS, LOG_CATEGORY_LABELS, REGION_LIST, isDepsStatusDone } from './constants';
@@ -55,6 +57,27 @@ export function ScriptListPanel({ onEditScript }: ScriptListPanelProps) {
   // Version selector state
   const [versionSelections, setVersionSelections] = useState<Record<string, string>>({});
 
+  // 巡检工具打包下载中的脚本 id
+  const [downloadingToolsId, setDownloadingToolsId] = useState<string | null>(null);
+
+  /** 一键下载巡检工具（tar.gz），注意阻止卡片点击进入编辑 */
+  const handleDownloadTools = async (e: React.MouseEvent, sel: Script) => {
+    e.stopPropagation();
+    if (downloadingToolsId) return;
+    setDownloadingToolsId(sel.id);
+    try {
+      const now = new Date();
+      const p = (n: number) => String(n).padStart(2, '0');
+      const dateStr = `${now.getFullYear()}${p(now.getMonth() + 1)}${p(now.getDate())}`;
+      const safeName = (sel.name || '').replace(/[\/\\:*?"<>|\x00-\x1f]/g, '_').trim() || 'script';
+      await downloadFile(`/scripts/${sel.id}/tools-download`, `${safeName}_巡检工具_${dateStr}.tar.gz`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : '下载巡检工具失败');
+    } finally {
+      setDownloadingToolsId(null);
+    }
+  };
+
   // Group scripts by name, sort versions — normalize old data
   const scriptGroups = useMemo(() => {
     const map = new Map<string, Script[]>();
@@ -65,6 +88,7 @@ export function ScriptListPanel({ onEditScript }: ScriptListPanelProps) {
         isMultiFile: raw.isMultiFile || false,
         templateIds: raw.templateIds || ((raw as unknown as { templateId?: string }).templateId ? [(raw as unknown as { templateId: string }).templateId] : []),
         auxiliaryFiles: raw.auxiliaryFiles || [],
+        toolFiles: raw.toolFiles || [],
       };
       const existing = map.get(s.name) || [];
       existing.push(s);
@@ -298,6 +322,25 @@ export function ScriptListPanel({ onEditScript }: ScriptListPanelProps) {
                       {renderDepsBadge(sel)}
                     </div>
                   </div>
+                  {/* 一键下载巡检工具（有工具文件时显示，阻止冒泡避免触发卡片编辑） */}
+                  {sel.toolFiles.length > 0 && (
+                    <div className="flex justify-end mt-1.5">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-7 text-xs"
+                        disabled={downloadingToolsId === sel.id}
+                        onClick={(e) => handleDownloadTools(e, sel)}
+                      >
+                        {downloadingToolsId === sel.id ? (
+                          <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                        ) : (
+                          <Download className="h-3 w-3 mr-1" />
+                        )}
+                        {downloadingToolsId === sel.id ? '打包下载中...' : `一键下载巡检工具（${sel.toolFiles.length}）`}
+                      </Button>
+                    </div>
+                  )}
                   {/* 描述行（可选，一行截断） */}
                   {sel.description && (
                     <p className="text-sm text-muted-foreground truncate mt-1">{sel.description}</p>

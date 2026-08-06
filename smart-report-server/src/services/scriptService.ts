@@ -58,6 +58,8 @@ export interface Script {
   auxiliaryFiles: AuxiliaryFile[];
   /** 多文件模式下的额外 .py 文件列表 */
   extraFiles: ExtraFile[];
+  /** 巡检工具文件列表 */
+  toolFiles: ToolFile[];
   /** 依赖包列表 */
   requirements: string[];
   /** 依赖状态 */
@@ -102,6 +104,20 @@ export interface ExtraFile {
   name: string;
   size: number;
   path: string;
+  hash: string;
+}
+
+/**
+ * 巡检工具文件接口（与辅助文件结构一致，存储在 scripts/{id}/tools/ 下）
+ */
+export interface ToolFile {
+  /** 文件名 */
+  name: string;
+  /** 文件大小 */
+  size: number;
+  /** 文件路径 */
+  path: string;
+  /** 文件哈希 */
   hash: string;
 }
 
@@ -196,6 +212,15 @@ export class ScriptService {
         script.extraFiles = script.extraFiles.filter((ef) => {
           if (seen.has(ef.name)) return false;
           seen.add(ef.name);
+          return true;
+        });
+      }
+      // 去重巡检工具文件
+      if (script.toolFiles && script.toolFiles.length > 0) {
+        const seen = new Set<string>();
+        script.toolFiles = script.toolFiles.filter((tf) => {
+          if (seen.has(tf.name)) return false;
+          seen.add(tf.name);
           return true;
         });
       }
@@ -312,6 +337,11 @@ export class ScriptService {
         path: string;
         size: number;
       }>;
+      toolFiles?: Array<{
+        filename: string;
+        path: string;
+        size: number;
+      }>;
     },
     extraScriptFiles?: Array<{
       filename: string;
@@ -390,6 +420,27 @@ export class ScriptService {
       }
     }
 
+    // 处理巡检工具文件（放在脚本根目录的 tools/ 下，两种模式共享）
+    const toolFiles: ToolFile[] = [];
+    if (metadata.toolFiles) {
+      log.info(`处理 ${metadata.toolFiles.length} 个巡检工具文件`, traceId);
+      const toolsDir = path.join(scriptRootDir, 'tools');
+      mkdirSync(toolsDir, { recursive: true });
+      for (const toolFile of metadata.toolFiles) {
+        const toolPath = path.join(toolsDir, toolFile.filename);
+        await safeMoveFile(toolFile.path, toolPath);
+
+        // 计算文件哈希
+        const fileHash = await this.computeFileHash(toolPath);
+        toolFiles.push({
+          name: toolFile.filename,
+          size: toolFile.size,
+          path: toolPath,
+          hash: fileHash,
+        });
+      }
+    }
+
     // 计算脚本文件哈希
     const scriptHash = await this.computeFileHash(destPath);
     const hashStart = Date.now();
@@ -433,6 +484,7 @@ export class ScriptService {
       templateIds: metadata.templateIds || [],
       auxiliaryFiles,
       extraFiles,
+      toolFiles,
       requirements: metadata.requirements || [],
       depsStatus: {
         status: 'none',
@@ -462,6 +514,7 @@ export class ScriptService {
     log.info(`✓ uploadScript 完成: ${script.name} (${id})`, traceId, {
       auxiliaryFileCount: auxiliaryFiles.length,
       extraFileCount: extraFiles.length,
+      toolFileCount: toolFiles.length,
       requirements: metadata.requirements?.length || 0,
     });
 
@@ -493,6 +546,7 @@ export class ScriptService {
       pythonVersion: string;
       depsStatus: Script['depsStatus'];
       auxiliaryFiles: AuxiliaryFile[];
+      toolFiles: ToolFile[];
       isMultiFile: boolean;
       reportNameTemplate: string;
       extraFiles: ExtraFile[];
@@ -585,6 +639,33 @@ export class ScriptService {
       }
     }
 
+    // 如果 toolFiles 在更新数据中，说明用户编辑了巡检工具文件列表（增删）
+    // 比对原数据库记录，删除多余的文件（磁盘 + DB 记录）
+    if (data.toolFiles !== undefined) {
+      const oldScript = await scriptRepository.findById(scriptId);
+      if (oldScript) {
+        const newToolNames = new Set(data.toolFiles.map((t) => t.name));
+        const toDeleteTools = oldScript.toolFiles.filter((t) => !newToolNames.has(t.name));
+        for (const tool of toDeleteTools) {
+          try {
+            if (existsSync(tool.path)) {
+              await fs.unlink(tool.path);
+              log.info(`删除磁盘上的巡检工具文件: ${tool.path}`, traceId, { scriptId, name: tool.name });
+            }
+          } catch (e) {
+            log.warn(`删除巡检工具文件失败: ${tool.path}: ${(e as Error).message}`, traceId);
+          }
+        }
+        if (toDeleteTools.length > 0) {
+          await scriptRepository.clearToolFiles(scriptId);
+          for (const keep of data.toolFiles) {
+            await scriptRepository.createToolFile(scriptId, keep);
+          }
+          log.info(`同步巡检工具文件: 删除 ${toDeleteTools.length} 个，保留 ${data.toolFiles.length} 个`, traceId);
+        }
+      }
+    }
+
     // 如果 extraFiles 在更新数据中（多文件模式编辑），同步数据库与磁盘
     if (data.extraFiles !== undefined) {
       const oldScript = await scriptRepository.findById(scriptId);
@@ -641,6 +722,7 @@ export class ScriptService {
     const dbData = { ...data };
     delete (dbData as any).auxiliaryFiles;
     delete (dbData as any).extraFiles;
+    delete (dbData as any).toolFiles;
 
     const updated = await scriptRepository.update(scriptId, dbData);
     log.dbOperation('UPDATE', 'scripts', Date.now() - dbStart, traceId, { scriptId });
@@ -1069,6 +1151,45 @@ export class ScriptService {
     }
 
     log.info(`✓ addAuxiliaryFiles 完成: ${scriptId}, 添加 ${auxiliaryFiles.length} 个辅助文件`, traceId);
+  }
+
+  /**
+   * 批量添加巡检工具文件
+   * 将新上传的工具文件移到脚本根目录的 tools/ 下，并写入 script_tool_files 表
+   *
+   * @param scriptId - 脚本ID
+   * @param toolFiles - 巡检工具文件列表
+   */
+  async addToolFiles(
+    scriptId: string,
+    toolFiles: Array<{ filename: string; path: string; size: number }>
+  ): Promise<void> {
+    const traceId = generateTraceId();
+    log.info(`⇢ addToolFiles`, traceId, { scriptId, count: toolFiles.length });
+
+    const script = await scriptRepository.findById(scriptId);
+    if (!script) {
+      log.warn(`脚本不存在: ${scriptId}`, traceId);
+      throw new Error('脚本不存在');
+    }
+
+    const scriptDir = path.join(this.scriptsDir, scriptId);
+    const toolsDir = path.join(scriptDir, 'tools');
+    mkdirSync(toolsDir, { recursive: true });
+
+    for (const toolFile of toolFiles) {
+      const toolPath = path.join(toolsDir, toolFile.filename);
+      await safeMoveFile(toolFile.path, toolPath);
+      const fileHash = await this.computeFileHash(toolPath);
+      await scriptRepository.createToolFile(scriptId, {
+        name: toolFile.filename,
+        size: toolFile.size,
+        path: toolPath,
+        hash: fileHash,
+      });
+    }
+
+    log.info(`✓ addToolFiles 完成: ${scriptId}, 添加 ${toolFiles.length} 个巡检工具文件`, traceId);
   }
 
   /**

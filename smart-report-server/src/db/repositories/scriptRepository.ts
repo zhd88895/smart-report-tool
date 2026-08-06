@@ -7,7 +7,7 @@
  */
 
 import { getAsync, allAsync, runAsync, withTransaction } from '../database';
-import type { Script, AuxiliaryFile, ExtraFile } from '../../services/scriptService';
+import type { Script, AuxiliaryFile, ExtraFile, ToolFile } from '../../services/scriptService';
 import { toAbsolutePath, toRelativePath } from '../../config';
 import { safeJsonParse } from '../../utils/json';
 
@@ -30,6 +30,7 @@ function rowToScript(row: any): Script {
     templateIds: safeJsonParse<string[]>(row.template_ids, []),
     auxiliaryFiles: [],
     extraFiles: [],
+    toolFiles: [],
     requirements: safeJsonParse<string[]>(row.requirements, []),
     depsStatus: safeJsonParse(row.deps_status, {
       status: 'none',
@@ -100,6 +101,7 @@ export const scriptRepository = {
     for (const script of scripts) {
       script.auxiliaryFiles = await this.findAuxiliaryFiles(script.id);
       script.extraFiles = await this.findExtraFiles(script.id);
+      script.toolFiles = await this.findToolFiles(script.id);
     }
     return scripts;
   },
@@ -110,6 +112,7 @@ export const scriptRepository = {
     const script = rowToScript(row);
     script.auxiliaryFiles = await this.findAuxiliaryFiles(id);
     script.extraFiles = await this.findExtraFiles(id);
+    script.toolFiles = await this.findToolFiles(id);
     return script;
   },
 
@@ -127,6 +130,11 @@ export const scriptRepository = {
     if (script.auxiliaryFiles && script.auxiliaryFiles.length > 0) {
       for (const aux of script.auxiliaryFiles) {
         await this.createAuxiliaryFile(script.id, aux);
+      }
+    }
+    if (script.toolFiles && script.toolFiles.length > 0) {
+      for (const tool of script.toolFiles) {
+        await this.createToolFile(script.id, tool);
       }
     }
     return script;
@@ -209,6 +217,27 @@ export const scriptRepository = {
 
   async clearAuxiliaryFiles(scriptId: string): Promise<void> {
     await runAsync('DELETE FROM script_auxiliary_files WHERE script_id = ?', [scriptId]);
+  },
+
+  async findToolFiles(scriptId: string): Promise<ToolFile[]> {
+    const rows = await allAsync('SELECT * FROM script_tool_files WHERE script_id = ?', [scriptId]);
+    return rows.map((row) => ({
+      name: row.name,
+      size: row.size,
+      path: toAbsolutePath(row.path),
+      hash: row.hash || '',
+    }));
+  },
+
+  async createToolFile(scriptId: string, tool: ToolFile): Promise<void> {
+    await runAsync(
+      'INSERT INTO script_tool_files (script_id, name, size, path, hash) VALUES (?, ?, ?, ?, ?)',
+      [scriptId, tool.name, tool.size, toRelativePath(tool.path), tool.hash || '']
+    );
+  },
+
+  async clearToolFiles(scriptId: string): Promise<void> {
+    await runAsync('DELETE FROM script_tool_files WHERE script_id = ?', [scriptId]);
   },
 
   async findExtraFiles(scriptId: string): Promise<ExtraFile[]> {

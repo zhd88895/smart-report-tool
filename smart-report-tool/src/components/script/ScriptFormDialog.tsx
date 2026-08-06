@@ -58,6 +58,7 @@ export function ScriptFormDialog({ open, onOpenChange, editTarget, onEditTargetC
   // Form state
   const [meta, setMeta] = useState(emptyMeta());
   const [auxFiles, setAuxFiles] = useState<File[]>([]);
+  const [toolFiles, setToolFiles] = useState<File[]>([]);
   const [uploading, setUploading] = useState(false);
   const [requirementsText, setRequirementsText] = useState('');
   const [isManualInput, setIsManualInput] = useState(false);
@@ -74,6 +75,7 @@ export function ScriptFormDialog({ open, onOpenChange, editTarget, onEditTargetC
   const [showScriptEditor, setShowScriptEditor] = useState(false);
   const [editorTarget, setEditorTarget] = useState<{ id: string; fileName: string } | null>(null);
   const [selectedAuxKeys, setSelectedAuxKeys] = useState<Set<string>>(new Set());
+  const [selectedToolKeys, setSelectedToolKeys] = useState<Set<string>>(new Set());
   const [showTemplatePicker, setShowTemplatePicker] = useState(false);
 
   // 隐藏的脚本文件 input ref，替换按钮直接触发
@@ -93,9 +95,10 @@ export function ScriptFormDialog({ open, onOpenChange, editTarget, onEditTargetC
   // 删除脚本确认弹窗
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
-  // 折叠区块：高级设置 / 模板与依赖（默认收起，每次打开对话框重置）
+  // 折叠区块：高级设置 / 模板与依赖 / 巡检工具（默认收起，每次打开对话框重置）
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [showDeps, setShowDeps] = useState(false);
+  const [showTools, setShowTools] = useState(false);
 
   // 打开对话框时初始化表单（render 期间派生状态，避免旧数据闪现）：
   // 上传模式 = 重置为空表单；编辑模式 = 从 editTarget 回填
@@ -105,20 +108,24 @@ export function ScriptFormDialog({ open, onOpenChange, editTarget, onEditTargetC
     if (open) {
       setShowAdvanced(false);
       setShowDeps(false);
+      setShowTools(false);
       if (editTarget) {
-        setMeta({ name: editTarget.name, description: editTarget.description, reportNameTemplate: editTarget.reportNameTemplate || '', scriptType: editTarget.scriptType, region: editTarget.region || '全部', inputFormats: editTarget.inputFormats || '', inputFormatManual: editTarget.inputFormatManual || false, version: editTarget.version, category: editTarget.category, templateRequired: editTarget.templateRequired, templateIds: [...editTarget.templateIds], auxiliaryFiles: dedupeAux([...editTarget.auxiliaryFiles]), extraFiles: dedupeAux([...(editTarget.extraFiles || [])]), requirements: editTarget.requirements || [], pythonVersion: editTarget.pythonVersion || 'embedded', isMultiFile: editTarget.isMultiFile || false });
+        setMeta({ name: editTarget.name, description: editTarget.description, reportNameTemplate: editTarget.reportNameTemplate || '', scriptType: editTarget.scriptType, region: editTarget.region || '全部', inputFormats: editTarget.inputFormats || '', inputFormatManual: editTarget.inputFormatManual || false, version: editTarget.version, category: editTarget.category, templateRequired: editTarget.templateRequired, templateIds: [...editTarget.templateIds], auxiliaryFiles: dedupeAux([...editTarget.auxiliaryFiles]), extraFiles: dedupeAux([...(editTarget.extraFiles || [])]), toolFiles: dedupeAux([...(editTarget.toolFiles || [])]), requirements: editTarget.requirements || [], pythonVersion: editTarget.pythonVersion || 'embedded', isMultiFile: editTarget.isMultiFile || false });
         setRequirementsText((editTarget.requirements || []).join('\n'));
         setSingleUploadFiles([]);
         setMultiUploadFiles([]);
         setEntryFileIdx(null);
         setSelectedEntryName(editTarget.fileName);
         setAuxFiles([]);
+        setToolFiles([]);
         setSelectedAuxKeys(new Set());
+        setSelectedToolKeys(new Set());
       } else {
         setMeta(emptyMeta());
         setSingleUploadFiles([]);
         setMultiUploadFiles([]);
         setAuxFiles([]);
+        setToolFiles([]);
         setRequirementsText('');
         setEntryFileIdx(null);
         setSelectedEntryName(null);
@@ -249,12 +256,17 @@ export function ScriptFormDialog({ open, onOpenChange, editTarget, onEditTargetC
         const relPath = getFilePath(af);
         if (relPath !== af.name) formData.append(`auxPath${idx}`, relPath);
       });
+      // 巡检工具文件：同一字段名 tools 追加多个，后端按数组接收
+      toolFiles.forEach((tf) => {
+        formData.append('tools', tf);
+      });
       await apiPost('/scripts', formData);
       onOpenChange(false);
       setMeta(emptyMeta());
       setSingleUploadFiles([]);
       setMultiUploadFiles([]);
       setAuxFiles([]);
+      setToolFiles([]);
       await fetchScripts();
       toast.success('上传成功');
     } catch (e) {
@@ -274,8 +286,9 @@ export function ScriptFormDialog({ open, onOpenChange, editTarget, onEditTargetC
     try {
       const hasNewScriptFile = uploadFiles.length > 0;
       const hasNewAuxFiles = auxFiles.length > 0;
+      const hasNewToolFiles = toolFiles.length > 0;
 
-      if (hasNewScriptFile || hasNewAuxFiles) {
+      if (hasNewScriptFile || hasNewAuxFiles || hasNewToolFiles) {
         const formData = new FormData();
         formData.append('name', meta.name.trim());
         formData.append('description', meta.description);
@@ -293,6 +306,7 @@ export function ScriptFormDialog({ open, onOpenChange, editTarget, onEditTargetC
         formData.append('isMultiFile', String(meta.isMultiFile));
         formData.append('existingAux', JSON.stringify(meta.auxiliaryFiles));
         formData.append('existingExtra', JSON.stringify(meta.extraFiles || []));
+        formData.append('existingTools', JSON.stringify(meta.toolFiles || []));
 
         // 如果用户选择了已保存的额外文件作为新主入口，通知后端 swap
         if (selectedEntryName && selectedEntryName !== editTarget?.fileName) {
@@ -324,9 +338,14 @@ export function ScriptFormDialog({ open, onOpenChange, editTarget, onEditTargetC
           if (relPath !== af.name) formData.append(`auxPath${idx}`, relPath);
         });
 
+        toolFiles.forEach((tf) => {
+          formData.append('tools', tf);
+        });
+
         const { updateScriptWithAuxFiles } = useScriptStore.getState();
         await updateScriptWithAuxFiles(editTarget.id, formData);
         setAuxFiles([]);
+        setToolFiles([]);
         setSingleUploadFiles([]);
         setMultiUploadFiles([]);
         setEntryFileIdx(null);
@@ -345,6 +364,7 @@ export function ScriptFormDialog({ open, onOpenChange, editTarget, onEditTargetC
           templateIds: meta.templateRequired ? meta.templateIds : [],
           requirements: parseRequirements(),
           auxiliaryFiles: meta.auxiliaryFiles,
+          toolFiles: meta.toolFiles,
           pythonVersion: meta.pythonVersion,
           isMultiFile: meta.isMultiFile,
         });
@@ -910,6 +930,65 @@ export function ScriptFormDialog({ open, onOpenChange, editTarget, onEditTargetC
                 })()}
               </div>
             )}
+            </div>
+            )}
+            {/* 巡检工具（默认收起）：随脚本分发的数据采集工具，不限扩展名 */}
+            <button
+              type="button"
+              className="flex w-full items-center gap-1.5 rounded-md px-2.5 py-2.5 text-sm text-muted-foreground hover:bg-muted/70 hover:text-foreground transition-colors"
+              onClick={() => setShowTools(!showTools)}
+            >
+              {showTools ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+              巡检工具 {showTools ? '（点击收起）' : '（点击展开）'}
+            </button>
+            {showTools && (
+            <div className="space-y-4 rounded-md border p-3">
+            <div className="space-y-2">
+              {editTarget ? (
+                <div className="flex items-center justify-between">
+                  <Label>巡检工具文件</Label>
+                  {meta.toolFiles.length > 0 && (
+                    <div className="flex items-center gap-1">
+                      <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => setSelectedToolKeys(new Set(meta.toolFiles.map(auxKey)))}>全选</Button>
+                      <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => {
+                        const next = new Set(selectedToolKeys);
+                        meta.toolFiles.forEach((af) => next.has(auxKey(af)) ? next.delete(auxKey(af)) : next.add(auxKey(af)));
+                        setSelectedToolKeys(next);
+                      }}>反选</Button>
+                      <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => setSelectedToolKeys(new Set())}>取消选择</Button>
+                      <Button variant="ghost" size="sm" className="h-7 text-xs text-destructive hover:text-destructive" disabled={selectedToolKeys.size === 0}
+                        onClick={() => {
+                          setMeta({ ...meta, toolFiles: dedupeAux(meta.toolFiles.filter((af) => !selectedToolKeys.has(auxKey(af)))) });
+                          setSelectedToolKeys(new Set());
+                        }}
+                      >删除选中{selectedToolKeys.size > 0 ? `(${selectedToolKeys.size})` : ''}</Button>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <Label>巡检工具文件（不限格式，可多选，选填）</Label>
+              )}
+              {editTarget && meta.toolFiles.length > 0 && (
+                <div className="flex flex-wrap gap-2 mb-2">
+                  {meta.toolFiles.map((af) => {
+                    const key = auxKey(af);
+                    const isSel = selectedToolKeys.has(key);
+                    return (
+                      <Badge key={key} variant={isSel ? 'default' : 'secondary'} className="gap-1 cursor-pointer select-none"
+                        onClick={() => {
+                          const next = new Set(selectedToolKeys);
+                          isSel ? next.delete(key) : next.add(key);
+                          setSelectedToolKeys(next);
+                        }}
+                      >
+                        <File className="h-3 w-3" />{af.name}
+                      </Badge>
+                    );
+                  })}
+                </div>
+              )}
+              <FileUploader files={toolFiles} onFilesChange={setToolFiles} triggerMode="manual" acceptedTypes="*/*" maxSizeMB={10} />
+            </div>
             </div>
             )}
           </div>

@@ -133,6 +133,16 @@ async function createSchema(): Promise<void> {
       FOREIGN KEY (script_id) REFERENCES scripts(id) ON DELETE CASCADE
     );
 
+    CREATE TABLE IF NOT EXISTS script_tool_files (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      script_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      size INTEGER DEFAULT 0,
+      path TEXT NOT NULL,
+      hash TEXT,
+      FOREIGN KEY (script_id) REFERENCES scripts(id) ON DELETE CASCADE
+    );
+
     CREATE TABLE IF NOT EXISTS templates (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,

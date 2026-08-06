@@ -23,7 +23,7 @@ export const useScriptStore = create<ScriptState>((set, get) => ({
 
   updateScript: async (id: string, updates: Partial<Script>) => {
     const body: Record<string, unknown> = {};
-    const allowed = ['name','description','scriptType','region','inputFormats','inputFormatManual','version','category','templateRequired','templateIds','requirements','auxiliaryFiles','depsStatus','pythonVersion','isMultiFile'];
+    const allowed = ['name','description','scriptType','region','inputFormats','inputFormatManual','version','category','templateRequired','templateIds','requirements','auxiliaryFiles','toolFiles','depsStatus','pythonVersion','isMultiFile'];
     for (const key of allowed) {
       if (updates[key as keyof Script] !== undefined) {
         body[key] = updates[key as keyof Script];
