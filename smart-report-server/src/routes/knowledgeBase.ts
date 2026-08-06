@@ -33,8 +33,10 @@ const router = Router();
  */
 function decodeOriginalName(name: string): string {
   if (!name) return name;
-  // 已含正常中文或不含高位字符，直接返回
-  if (/[一-鿿]/.test(name) || !/[-ÿ]/.test(name)) return name;
+  // 已含正常中文（CJK 统一表意文字），直接返回
+  if (/[一-鿿]/.test(name)) return name;
+  // 纯 ASCII（无高位字符），无需修复
+  if (!/[-ÿ]/.test(name)) return name;
   const decoded = Buffer.from(name, 'latin1').toString('utf8');
   return decoded.includes('�') ? name : decoded;
 }
