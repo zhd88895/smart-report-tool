@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { EmptyState } from '@/components/common/EmptyState';
-import { formatFileSize } from '@/utils/formatters';
+import { LOG_CATEGORY_LABELS } from '@/constants/categories';
 import { ChevronRight, Check, AlertCircle } from 'lucide-react';
 import { isDepsReady } from './scriptDeps';
 
@@ -61,11 +61,14 @@ export function StepScript({
                         : <Badge className="text-xs bg-red-50 text-red-600 border-red-200 hover:bg-red-50 pointer-events-none"><AlertCircle className="h-3 w-3 mr-0.5" />未就绪</Badge>
                     )}
                   </div>
-                  <p className="text-xs text-muted-foreground">{s.description || s.fileName} · {formatFileSize(s.fileSize)}</p>
+                  <p className="text-xs text-muted-foreground">{s.description || s.fileName}</p>
                 </div>
                 <div className="flex items-center gap-2">
-                  <Badge variant="secondary">Python</Badge>
-                  <Badge variant="outline">v{s.version}</Badge>
+                  <Badge variant="outline" className="text-xs">{LOG_CATEGORY_LABELS[s.category] || s.category}</Badge>
+                  <Badge variant="secondary" className="text-xs">
+                    {s.pythonVersion && s.pythonVersion !== 'embedded' ? `Python ${s.pythonVersion}` : 'Python 内嵌'}
+                  </Badge>
+                  <Badge variant="outline" className="text-xs">v{s.version}</Badge>
                 </div>
               </div>
             </div>
