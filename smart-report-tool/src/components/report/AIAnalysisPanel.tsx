@@ -402,7 +402,8 @@ export function AIAnalysisPanel() {
           {/* 高级选项 */}
           <div className="space-y-1">
             <div className="text-sm font-medium text-muted-foreground pb-0.5">高级选项</div>
-          {/* 补充信息表单：主机/存储/交换机为「设备信息补充」，虚拟化/数据库为「信息补充」，「其他」类别不展示 */}
+          {/* 补充信息表单：主机/存储/交换机为「设备信息补充」，虚拟化/数据库为「信息补充」，「其他」类别不展示；
+              支持包模式（support）按整机对待，复用主机（服务器）字段 */}
           {category !== 'other' && (
           <div className="space-y-1.5">
             <button
@@ -419,7 +420,7 @@ export function AIAnalysisPanel() {
             {showSupplementForm && (
               <AssetSupplementForm
                 reportId={`temp_${Date.now()}`}
-                assetType={category as AssetType}
+                assetType={(category === 'support' ? 'host' : category) as AssetType}
                 onSupplementsChange={setSupplements}
                 initialSupplements={supplements}
               />
