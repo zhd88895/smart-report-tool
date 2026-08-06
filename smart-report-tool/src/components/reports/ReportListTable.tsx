@@ -52,7 +52,8 @@ export function ReportListTable({
     {
       key: 'status',
       header: '状态',
-      width: '80px',
+      width: '90px',
+      minWidth: 90,
       sortable: true,
       align: 'center' as const,
       render: (item: Report) => <StatusBadge status={item.status} />,

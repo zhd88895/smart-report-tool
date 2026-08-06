@@ -36,6 +36,8 @@ interface Column<T> {
   flex?: boolean;
   /** 列内容对齐方式（表头与单元格同时生效，默认 left） */
   align?: 'left' | 'center' | 'right';
+  /** 列最小像素宽度（拖拽/自动缩放都不会低于此值，默认 60） */
+  minWidth?: number;
 }
 
 interface DataTableProps<T> {
@@ -65,6 +67,16 @@ interface PersistedTableState {
 function baseWidth<T>(col: Column<T>): number {
   const px = col.width ? parseInt(col.width, 10) : NaN;
   return Number.isFinite(px) && px > 0 ? px : DEFAULT_COL_WIDTH;
+}
+
+/** 列最小宽度：列定义 minWidth 优先，否则全局最小值 */
+function minWidthOf<T>(col: Column<T>): number {
+  return col.minWidth && col.minWidth > MIN_COL_WIDTH ? col.minWidth : MIN_COL_WIDTH;
+}
+
+/** 生效宽度：基础宽/拖拽结果，但不得小于列最小宽度（兼容旧的过窄持久化值） */
+function effectiveWidth<T>(col: Column<T>, widths: Record<string, number>): number {
+  return Math.max(minWidthOf(col), widths[col.key] ?? baseWidth(col));
 }
 
 /** 读取持久化状态，损坏数据回退默认 */
@@ -192,15 +204,15 @@ export function DataTable<T>({ columns, data, rowKey, keyExtractor, pageSize = 1
         for (const c of nonFlex) next[c.key] = baseWidth(c);
         const nonFlexTotal = nonFlex.reduce((s, c) => s + baseWidth(c), 0);
         const flexBase = flexCols.reduce((s, c) => s + baseWidth(c), 0);
-        const flexSpace = Math.max(flexCols.length * MIN_COL_WIDTH, remaining - nonFlexTotal);
+        const flexSpace = Math.max(flexCols.reduce((s, c) => s + minWidthOf(c), 0), remaining - nonFlexTotal);
         for (const c of flexCols) {
-          next[c.key] = Math.max(MIN_COL_WIDTH, Math.round((flexSpace * baseWidth(c)) / flexBase));
+          next[c.key] = Math.max(minWidthOf(c), Math.round((flexSpace * baseWidth(c)) / flexBase));
         }
       } else {
         // 无 flex 列：所有未固定列按基础宽等比缩放
         const freeBase = free.reduce((s, c) => s + baseWidth(c), 0);
         for (const c of free) {
-          next[c.key] = Math.max(MIN_COL_WIDTH, Math.round((remaining * baseWidth(c)) / freeBase));
+          next[c.key] = Math.max(minWidthOf(c), Math.round((remaining * baseWidth(c)) / freeBase));
         }
       }
       setWidths(next);
@@ -222,7 +234,9 @@ export function DataTable<T>({ columns, data, rowKey, keyExtractor, pageSize = 1
     document.body.style.userSelect = 'none';
     document.body.style.cursor = 'col-resize';
     const onMove = (ev: MouseEvent) => {
-      const nw = Math.max(MIN_COL_WIDTH, Math.round(startW + ev.clientX - startX));
+      const colDef = stateRef.current.columns.find((c) => c.key === key);
+      const minW = colDef ? minWidthOf(colDef) : MIN_COL_WIDTH;
+      const nw = Math.max(minW, Math.round(startW + ev.clientX - startX));
       setWidths((prev) => ({ ...prev, [key]: nw }));
     };
     const onUp = () => {
@@ -245,7 +259,7 @@ export function DataTable<T>({ columns, data, rowKey, keyExtractor, pageSize = 1
     () => (tableId ? columns.filter((c) => !hiddenCols.includes(c.key)) : columns),
     [tableId, columns, hiddenCols],
   );
-  const totalWidth = visibleColumns.reduce((s, c) => s + (widths[c.key] ?? baseWidth(c)), 0);
+  const totalWidth = visibleColumns.reduce((s, c) => s + effectiveWidth(c, widths), 0);
 
   // ── 分页 ──
   const totalPages = Math.max(1, Math.ceil(sortedData.length / pageSize));
@@ -284,7 +298,7 @@ export function DataTable<T>({ columns, data, rowKey, keyExtractor, pageSize = 1
               {visibleColumns.map((col) => (
                 <TableHead
                   key={col.key}
-                  style={tableId ? { width: widths[col.key] ?? baseWidth(col) } : { width: col.width }}
+                  style={tableId ? { width: effectiveWidth(col, widths) } : { width: col.width }}
                   className={tableId
                     ? `relative group border-r border-border last:border-r-0 ${col.align === 'center' ? 'text-center' : col.align === 'right' ? 'text-right' : ''}`
                     : undefined}
