@@ -320,37 +320,39 @@ export function ScriptListPanel({ onEditScript }: ScriptListPanelProps) {
                       <Badge variant="outline">{LOG_CATEGORY_LABELS[sel.category]}</Badge>
                       {sel.region && sel.region !== '全部' && <Badge variant="outline" className="text-xs">{sel.region}</Badge>}
                       {renderDepsBadge(sel)}
-                      {/* 一键下载巡检工具（有工具文件时显示，阻止冒泡避免触发卡片编辑） */}
-                      {sel.toolFiles.length > 0 && (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="h-6 px-2 text-xs"
-                          disabled={downloadingToolsId === sel.id}
-                          onClick={(e) => handleDownloadTools(e, sel)}
-                        >
-                          {downloadingToolsId === sel.id ? (
-                            <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-                          ) : (
-                            <Download className="h-3 w-3 mr-1" />
-                          )}
-                          {downloadingToolsId === sel.id ? '打包中...' : `巡检工具（${sel.toolFiles.length}）`}
-                        </Button>
-                      )}
                     </div>
                   </div>
                   {/* 描述行（可选，一行截断） */}
                   {sel.description && (
                     <p className="text-sm text-muted-foreground truncate mt-1">{sel.description}</p>
                   )}
-                  {/* 元信息行 */}
-                  <div className="flex items-center gap-1.5 text-xs text-muted-foreground flex-wrap mt-1">
-                    {metaItems.map((item, i) => (
-                      <Fragment key={i}>
-                        {i > 0 && <span className="text-muted-foreground/50">·</span>}
-                        <span>{item}</span>
-                      </Fragment>
-                    ))}
+                  {/* 元信息行（右侧可放巡检工具下载按钮） */}
+                  <div className="flex items-center justify-between gap-2 mt-1">
+                    <div className="flex items-center gap-1.5 text-xs text-muted-foreground flex-wrap min-w-0">
+                      {metaItems.map((item, i) => (
+                        <Fragment key={i}>
+                          {i > 0 && <span className="text-muted-foreground/50">·</span>}
+                          <span>{item}</span>
+                        </Fragment>
+                      ))}
+                    </div>
+                    {/* 一键下载巡检工具（有工具文件时显示，阻止冒泡避免触发卡片编辑） */}
+                    {sel.toolFiles.length > 0 && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-6 px-2 text-xs shrink-0"
+                        disabled={downloadingToolsId === sel.id}
+                        onClick={(e) => handleDownloadTools(e, sel)}
+                      >
+                        {downloadingToolsId === sel.id ? (
+                          <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                        ) : (
+                          <Download className="h-3 w-3 mr-1" />
+                        )}
+                        {downloadingToolsId === sel.id ? '打包中...' : `巡检工具（${sel.toolFiles.length}）`}
+                      </Button>
+                    )}
                   </div>
                   {/* 关联模板 Badge 行（可选） */}
                   {sel.templateRequired && linkedTpls.length > 0 && (
