@@ -18,7 +18,7 @@ import { isDepsReady, getUnreadyDeps } from '@/components/report/create/scriptDe
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { toast } from 'sonner';
-import { ChevronRight, CheckCircle, AlertCircle, X as XIcon } from 'lucide-react';
+import { ChevronRight, CheckCircle, AlertCircle, X as XIcon, Sparkles, FileText } from 'lucide-react';
 import { getRunningReportId, clearRunningReportId, pollReportLogs, pollReportStatus, apiExtractArchive } from '@/services/api';
 
 export default function ReportCreatePage() {
@@ -491,7 +491,10 @@ export default function ReportCreatePage() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-3">
-        <h2 className="text-2xl font-bold tracking-tight">{pageTitle}</h2>
+        <h2 className="text-2xl font-bold tracking-tight flex items-center gap-2">
+          {useAI ? <Sparkles className="h-6 w-6" /> : <FileText className="h-6 w-6" />}
+          {pageTitle}
+        </h2>
       </div>
 
       {useAI ? (
@@ -619,7 +622,7 @@ export default function ReportCreatePage() {
           <Dialog open={showDepsWarning} onOpenChange={setShowDepsWarning}>
             <DialogContent className="max-w-md">
               <DialogHeader>
-                <DialogTitle className="flex items-center gap-2 text-yellow-600">
+                <DialogTitle className="flex items-center gap-2 text-amber-600">
                   <AlertCircle className="h-5 w-5" />依赖未就绪
                 </DialogTitle>
                 <DialogDescription>
@@ -631,7 +634,7 @@ export default function ReportCreatePage() {
                 <div className="max-h-40 overflow-y-auto border rounded-lg p-3 bg-muted/30">
                   {selectedScript && getUnreadyDeps(selectedScript).map((dep, i) => (
                     <div key={i} className="flex items-center gap-2 text-sm py-1">
-                      <XIcon className="h-3.5 w-3.5 text-red-500 shrink-0" />
+                      <XIcon className="h-3.5 w-3.5 text-destructive shrink-0" />
                       <span className="font-mono text-xs">{dep}</span>
                     </div>
                   ))}

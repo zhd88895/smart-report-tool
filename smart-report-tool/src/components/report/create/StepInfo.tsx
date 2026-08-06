@@ -29,7 +29,7 @@ export function StepInfo({
 }: StepInfoProps) {
   return (
     <Card>
-      <CardHeader><CardTitle>步骤4：填写报告信息</CardTitle></CardHeader>
+      <CardHeader className="pb-2"><CardTitle className="text-base">步骤4：填写报告信息</CardTitle></CardHeader>
       <CardContent className="space-y-4">
         <div className="grid grid-cols-2 gap-4">
           <div className="space-y-2">

@@ -32,7 +32,7 @@ export function StepTemplate({
 
   return (
     <Card>
-      <CardHeader><CardTitle>步骤2：选择报告模板</CardTitle></CardHeader>
+      <CardHeader className="pb-2"><CardTitle className="text-base">步骤2：选择报告模板</CardTitle></CardHeader>
       <CardContent className="space-y-4">
         {selectedScript && selectedScript.templateIds.length > 0 ? (
           <div className="rounded-lg border p-4 bg-primary/5 border-primary/30">

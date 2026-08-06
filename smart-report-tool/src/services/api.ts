@@ -259,13 +259,12 @@ export interface PythonEnvProbe {
  */
 export interface PythonEnvironmentInfo {
   embedded: PythonEnvProbe;
-  venv: PythonEnvProbe;
   system: PythonEnvProbe;
   pipIndexUrl: string;
 }
 
 /**
- * 获取脚本运行环境信息（内嵌 Python / 全局 venv / 系统 Python / pip 镜像源）
+ * 获取脚本运行环境信息（内嵌 Python / 系统 Python / pip 镜像源）
  */
 export async function apiGetPythonEnvironment(): Promise<PythonEnvironmentInfo> {
   const res = await fetchWithAuth(`${API_BASE}/python-versions/environment`);

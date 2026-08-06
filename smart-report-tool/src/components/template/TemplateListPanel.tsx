@@ -44,7 +44,7 @@ export function TemplateListPanel({ onEditTemplate }: TemplateListPanelProps) {
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-3">
                     <span className="text-sm font-medium">{tpl.name}</span>
-                    <Badge variant="outline">{tpl.fileType.toUpperCase()}</Badge>
+                    <Badge variant="outline" className="text-xs">{tpl.fileType.toUpperCase()}</Badge>
                     <span className="text-xs text-muted-foreground">{formatFileSize(tpl.fileSize)}</span>
                   </div>
                   {tpl.description && (
@@ -52,15 +52,15 @@ export function TemplateListPanel({ onEditTemplate }: TemplateListPanelProps) {
                   )}
                 </div>
                 <div className="flex items-center gap-1 ml-2">
-                  <Button variant="ghost" size="icon" onClick={() => handleTplDownload(tpl)} title="下载模板文件">
+                  <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleTplDownload(tpl)} title="下载模板文件">
                     <Download className="h-4 w-4" />
                   </Button>
                   {canManage && (
                     <>
-                      <Button variant="ghost" size="icon" onClick={() => onEditTemplate(tpl)} title="编辑模板">
+                      <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => onEditTemplate(tpl)} title="编辑模板">
                         <Pencil className="h-4 w-4" />
                       </Button>
-                      <Button variant="ghost" size="icon" onClick={() => setDeleteTplTarget(tpl)} title="删除模板">
+                      <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive" onClick={() => setDeleteTplTarget(tpl)} title="删除模板">
                         <Trash2 className="h-4 w-4" />
                       </Button>
                     </>

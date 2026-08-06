@@ -45,7 +45,7 @@ export function StepUpload({
 }: StepUploadProps) {
   return (
     <Card>
-      <CardHeader><CardTitle>步骤{stepNumber}：上传巡检数据文件</CardTitle></CardHeader>
+      <CardHeader className="pb-2"><CardTitle className="text-base">步骤{stepNumber}：上传巡检数据文件</CardTitle></CardHeader>
       <CardContent>
         <BatchFileUploader
           files={files}

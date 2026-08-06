@@ -88,8 +88,13 @@ export function ConversationRecordsPanel() {
       key: 'actions',
       header: '操作',
       render: (item: Conversation) => (
-        <Button variant="ghost" size="sm" onClick={() => setDeleteTarget(item)}>
-          <Trash2 className="h-4 w-4 text-destructive" />
+        <Button
+          variant="ghost" size="icon"
+          className="h-8 w-8 text-destructive hover:text-destructive"
+          title="删除对话"
+          onClick={() => setDeleteTarget(item)}
+        >
+          <Trash2 className="h-4 w-4" />
         </Button>
       ),
     },
@@ -115,9 +120,9 @@ export function ConversationRecordsPanel() {
       </div>
 
       <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <MessageSquare className="h-5 w-5" />
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base flex items-center gap-2">
+            <MessageSquare className="h-4 w-4" />
             我的对话记录
           </CardTitle>
         </CardHeader>

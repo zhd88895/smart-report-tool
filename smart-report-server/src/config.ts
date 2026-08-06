@@ -207,7 +207,6 @@ export const TEMPLATES_DIR = path.join(DATA_DIR, 'templates');
 export const UPLOADS_DIR = path.join(DATA_DIR, 'uploads');
 export const REPORTS_DIR = path.join(DATA_DIR, 'reports');
 export const LOGS_DIR = path.join(DATA_DIR, 'logs');
-export const VENV_PYTHON = path.join(DATA_DIR, 'venv', 'Scripts', 'python.exe');
 export const EMBEDDED_PYTHON = path.join(DATA_DIR, 'python-embedded', 'python.exe');
 
 /**

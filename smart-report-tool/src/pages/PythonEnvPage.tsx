@@ -329,18 +329,12 @@ export default function PythonEnvPage() {
             <LoadingSpinner text="探测 Python 环境中..." className="py-16" />
           ) : (
             <>
-              <div className="grid gap-4 md:grid-cols-3">
+              <div className="grid gap-4 md:grid-cols-2">
                 <EnvCard
                   title="内嵌 Python"
                   description="应用自带的嵌入式 Python，无需安装即可运行脚本"
                   icon={Box}
                   probe={envInfo?.embedded}
-                />
-                <EnvCard
-                  title="全局虚拟环境"
-                  description="脚本依赖默认安装到全局 venv，所有脚本共享"
-                  icon={Terminal}
-                  probe={envInfo?.venv}
                 />
                 <EnvCard
                   title="系统 Python"
@@ -358,7 +352,7 @@ export default function PythonEnvPage() {
                 <CardContent className="text-sm text-muted-foreground space-y-2">
                   <p>脚本实际运行时按以下优先级选择 Python 解释器：</p>
                   <p className="font-mono text-xs bg-muted/50 rounded-md px-3 py-2">
-                    脚本专属 venv → 全局 venv → 内嵌 Python → 系统 Python
+                    脚本专属 venv → 内嵌 Python → 系统 Python
                   </p>
                   <p>
                     当前 pip 镜像源：

@@ -332,10 +332,10 @@ export function AIAnalysisPanel() {
   return (
     <div className="space-y-4">
       <Card>
-        <CardHeader className="pb-3">
+        <CardHeader className="pb-2">
           <div className="flex items-center justify-between">
             <CardTitle className="text-base flex items-center gap-2">
-              <Bot className="h-5 w-5 text-primary" />AI 智能分析
+              <Bot className="h-4 w-4 text-primary" />AI 智能分析
             </CardTitle>
             <ModelSelector />
           </div>
@@ -571,10 +571,10 @@ export function AIAnalysisPanel() {
 
       {(streamingText || result || error) && (
         <Card>
-          <CardHeader className="pb-3">
+          <CardHeader className="pb-2">
             <div className="flex items-center justify-between">
               <CardTitle className="text-base flex items-center gap-2">
-                {error ? <AlertTriangle className="h-5 w-5 text-destructive" /> : <CheckCircle className="h-5 w-5 text-green-500" />}
+                {error ? <AlertTriangle className="h-4 w-4 text-destructive" /> : <CheckCircle className="h-4 w-4 text-green-500" />}
                 {analyzing ? '分析中...' : error ? '分析出错' : '分析结果'}
               </CardTitle>
             </div>

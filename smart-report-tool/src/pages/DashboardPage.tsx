@@ -119,10 +119,10 @@ export default function DashboardPage() {
       value: scripts.length,
       sub: `可下载报告 ${reports.filter((r) => r.status === 'success').length} 份`,
       icon: FileText,
-      color: 'text-sidebar-muted',
+      color: 'text-muted-foreground',
     },
     ...(user?.role === 'admin'
-      ? [{ title: '用户数量', value: users.length, sub: '系统注册用户', icon: Users, color: 'text-sidebar-muted' }]
+      ? [{ title: '用户数量', value: users.length, sub: '系统注册用户', icon: Users, color: 'text-muted-foreground' }]
       : []),
   ];
 
@@ -181,8 +181,8 @@ export default function DashboardPage() {
           </Badge>
         ) : (
           <Badge
-            variant="outline"
-            className="cursor-pointer gap-1.5 border-amber-500/50 px-3 py-1.5 text-xs text-amber-600 hover:bg-amber-500/10"
+            variant="warning"
+            className="cursor-pointer gap-1.5 px-3 py-1.5 text-xs"
             onClick={() => navigate(ROUTES.AI_SETTINGS)}
           >
             <AlertTriangle className="h-3.5 w-3.5" />
@@ -259,8 +259,10 @@ export default function DashboardPage() {
       <div className="grid gap-4 lg:grid-cols-2">
         {/* 最近 AI 分析 */}
         <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0">
-            <CardTitle className="text-base">最近 AI 分析</CardTitle>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-base flex items-center gap-2">
+              <Sparkles className="h-4 w-4" />最近 AI 分析
+            </CardTitle>
             <button
               className="flex items-center gap-1 text-xs text-primary hover:underline"
               onClick={() => navigate(`${ROUTES.REPORTS}?tab=ai`)}
@@ -277,7 +279,7 @@ export default function DashboardPage() {
                 {aiReports.map((report) => (
                   <div
                     key={report.id}
-                    className="flex cursor-pointer items-center justify-between rounded-md border p-3 transition-colors hover:bg-accent"
+                    className="flex cursor-pointer items-center justify-between rounded-lg border p-3 transition-colors hover:bg-accent"
                     onClick={() => navigate(`${ROUTES.REPORTS}?tab=ai`)}
                   >
                     <div className="flex min-w-0 items-center gap-3">
@@ -297,8 +299,10 @@ export default function DashboardPage() {
 
         {/* 最近对话 */}
         <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0">
-            <CardTitle className="text-base">最近对话</CardTitle>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-base flex items-center gap-2">
+              <MessageSquare className="h-4 w-4" />最近对话
+            </CardTitle>
             <button
               className="flex items-center gap-1 text-xs text-primary hover:underline"
               onClick={() => navigate(ROUTES.ASSISTANT)}
@@ -315,7 +319,7 @@ export default function DashboardPage() {
                 {recentConversations.map((conv) => (
                   <div
                     key={conv.id}
-                    className="flex cursor-pointer items-center justify-between gap-3 rounded-md border p-3 transition-colors hover:bg-accent"
+                    className="flex cursor-pointer items-center justify-between gap-3 rounded-lg border p-3 transition-colors hover:bg-accent"
                     onClick={() => navigate(`${ROUTES.ASSISTANT}?id=${conv.id}`)}
                   >
                     <div className="flex min-w-0 items-center gap-3">

@@ -15,7 +15,7 @@ import fs from 'fs/promises';
 import { existsSync, mkdirSync } from 'fs';
 import path from 'path';
 import { spawn, execSync } from 'child_process';
-import { config, SCRIPTS_DIR, VENV_PYTHON, EMBEDDED_PYTHON, getPipIndexUrl } from '../config';
+import { config, SCRIPTS_DIR, EMBEDDED_PYTHON, getPipIndexUrl } from '../config';
 
 // 模块级日志实例（核心业务模块）
 const log = getLogger('ScriptService', 'core');
@@ -117,7 +117,6 @@ const MULTI_SUBDIR = 'multi';
  */
 export class ScriptService {
   private readonly scriptsDir: string;
-  private readonly venvPython: string;
   private cachedPython: string | null = null;
 
   /**
@@ -125,7 +124,6 @@ export class ScriptService {
    */
   constructor() {
     this.scriptsDir = SCRIPTS_DIR;
-    this.venvPython = VENV_PYTHON;
 
     // 确保脚本目录存在
     if (!existsSync(this.scriptsDir)) {
@@ -1353,11 +1351,6 @@ export class ScriptService {
       return [scriptVenv, []];
     }
 
-    // 其次使用全局虚拟环境
-    if (existsSync(this.venvPython)) {
-      return [this.venvPython, []];
-    }
-
     // 最后查找系统 Python（支持 python / python3 / py 启动器）
     return this.findSystemPython();
   }
@@ -1422,7 +1415,7 @@ export class ScriptService {
     onLog?: (message: string) => void,
     scriptId?: string
   ): Promise<void> {
-    // 查找可用的 Python（内嵌 > 全局 venv > 系统）
+    // 查找可用的 Python（内嵌 > 系统）
     let systemPython: [string, string[]];
     
     // 如果指定了脚本，检查是否指定了特定的 Python 版本
@@ -1533,13 +1526,11 @@ export class ScriptService {
   }
 
   /**
-   * 查找默认 Python（内嵌 > 全局 venv > 系统）
+   * 查找默认 Python（内嵌 > 系统）
    */
   private findDefaultPython(): [string, string[]] {
     if (existsSync(EMBEDDED_PYTHON)) {
       return [EMBEDDED_PYTHON, []];
-    } else if (existsSync(this.venvPython)) {
-      return [this.venvPython, []];
     } else {
       return this.findSystemPython();
     }

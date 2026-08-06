@@ -99,7 +99,7 @@ export default function SystemSettingsPage() {
           <SettingsIcon className="h-6 w-6" />系统设置
         </h2>
         <div className="flex items-center gap-2">
-          <Badge variant="outline" className={cn(isAdmin ? '' : 'opacity-50')}>
+          <Badge variant="outline" className={cn('text-xs', isAdmin ? '' : 'opacity-50')}>
             {isAdmin ? '管理员（可编辑）' : '高级成员（只读）'}
           </Badge>
           <Button variant="outline" size="sm" onClick={openHistory}>

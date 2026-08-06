@@ -25,7 +25,7 @@ import {
 import { toast } from 'sonner';
 import {
   FolderPlus, Upload, Search, Trash2, Edit, FileText, FileCode,
-  Archive, RefreshCw, Folder, AlertCircle,
+  Archive, RefreshCw, Folder, AlertCircle, Check,
 } from 'lucide-react';
 import { ConfirmDialog } from '@/components/common/ConfirmDialog';
 import { EmptyState } from '@/components/common/EmptyState';
@@ -277,17 +277,19 @@ export default function KnowledgeBasePage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-2">
         <div>
-          <h2 className="text-2xl font-bold tracking-tight">知识库管理</h2>
-          <p className="text-muted-foreground">管理知识库分类与文件，支持在AI分析时关联参考</p>
+          <h2 className="text-2xl font-bold tracking-tight flex items-center gap-2">
+            <Folder className="h-6 w-6" />知识库管理
+          </h2>
+          <p className="text-sm text-muted-foreground mt-1">管理知识库分类与文件，支持在AI分析时关联参考</p>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" onClick={openNewCategory}>
-            <FolderPlus className="h-4 w-4 mr-2" />新建分类
+          <Button variant="outline" size="sm" onClick={openNewCategory}>
+            <FolderPlus className="h-4 w-4 mr-1" />新建分类
           </Button>
-          <Button onClick={openUpload}>
-            <Upload className="h-4 w-4 mr-2" />上传文件
+          <Button size="sm" onClick={openUpload}>
+            <Upload className="h-4 w-4 mr-1" />上传文件
           </Button>
         </div>
       </div>
@@ -296,8 +298,8 @@ export default function KnowledgeBasePage() {
         {/* 左侧：分类列表 */}
         <div className="w-56 shrink-0 space-y-2">
           <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm flex items-center gap-2">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base flex items-center gap-2">
                 <Folder className="h-4 w-4" />分类
               </CardTitle>
             </CardHeader>
@@ -328,8 +330,8 @@ export default function KnowledgeBasePage() {
                     <button className="p-1 hover:bg-accent rounded" onClick={() => openEditCategory(cat)}>
                       <Edit className="h-3 w-3" />
                     </button>
-                    <button className="p-1 hover:bg-accent rounded" onClick={() => deleteCategory(cat)}>
-                      <Trash2 className="h-3 w-3 text-red-500" />
+                    <button className="p-1 hover:bg-accent rounded" onClick={() => deleteCategory(cat)} title="删除分类">
+                      <Trash2 className="h-3 w-3 text-destructive" />
                     </button>
                   </div>
                 </div>
@@ -392,11 +394,15 @@ export default function KnowledgeBasePage() {
                         <TableCell className="text-sm">{formatFileSize(file.file_size)}</TableCell>
                         <TableCell>
                           {file.status === 'ready' ? (
-                            <Badge variant="secondary" className="bg-green-100 text-green-700">就绪</Badge>
+                            <Badge variant="default" className="text-xs">
+                              <Check className="h-3 w-3 mr-1" />就绪
+                            </Badge>
                           ) : file.status === 'error' ? (
-                            <Badge variant="secondary" className="bg-red-100 text-red-700">解析失败</Badge>
+                            <Badge variant="destructive" className="text-xs">
+                              <AlertCircle className="h-3 w-3 mr-1" />解析失败
+                            </Badge>
                           ) : (
-                            <Badge variant="secondary">{file.status}</Badge>
+                            <Badge variant="secondary" className="text-xs">{file.status}</Badge>
                           )}
                         </TableCell>
                         <TableCell className="text-sm text-muted-foreground">
@@ -405,16 +411,22 @@ export default function KnowledgeBasePage() {
                         <TableCell className="text-right">
                           {file.status === 'error' && (
                             <Button
-                              variant="ghost" size="sm"
+                              variant="ghost" size="icon"
+                              className="h-8 w-8"
                               title="重新解析"
                               disabled={reparsingId === file.id}
                               onClick={() => reparseFile(file)}
                             >
-                              <RefreshCw className={cn('h-4 w-4 text-amber-600', reparsingId === file.id && 'animate-spin')} />
+                              <RefreshCw className={cn('h-4 w-4', reparsingId === file.id && 'animate-spin')} />
                             </Button>
                           )}
-                          <Button variant="ghost" size="sm" onClick={() => deleteFile(file)}>
-                            <Trash2 className="h-4 w-4 text-red-500" />
+                          <Button
+                            variant="ghost" size="icon"
+                            className="h-8 w-8 text-destructive hover:text-destructive"
+                            title="删除文件"
+                            onClick={() => deleteFile(file)}
+                          >
+                            <Trash2 className="h-4 w-4" />
                           </Button>
                         </TableCell>
                       </TableRow>

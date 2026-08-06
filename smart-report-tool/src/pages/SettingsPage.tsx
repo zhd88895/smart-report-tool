@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Save, Shield, Lock, Trash2, AlertTriangle } from 'lucide-react';
+import { Save, Shield, Lock, Trash2, AlertTriangle, UserCog, User as UserIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -112,7 +112,9 @@ export default function SettingsPage() {
 
   return (
     <div className="space-y-6">
-      <h2 className="text-2xl font-bold tracking-tight">个人设置</h2>
+      <h2 className="text-2xl font-bold tracking-tight flex items-center gap-2">
+        <UserCog className="h-6 w-6" />个人设置
+      </h2>
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList>
@@ -124,8 +126,10 @@ export default function SettingsPage() {
           {/* 双列布局：左列基本信息，右列修改密码 + 危险操作，避免右侧大片留白 */}
           <div className="grid gap-6 lg:grid-cols-2 items-start">
             <Card>
-              <CardHeader>
-                <CardTitle>基本信息</CardTitle>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <UserIcon className="h-4 w-4" />基本信息
+                </CardTitle>
                 <CardDescription>查看和修改您的个人资料</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
@@ -155,8 +159,8 @@ export default function SettingsPage() {
                     <p className="text-xs text-muted-foreground">设置你的管辖区域，报告中同区域数据将优先展示</p>
                   </div>
                 )}
-                <Button onClick={handleSave} disabled={saving}>
-                  {saving ? <LoadingSpinner className="inline-flex py-0 mr-2" /> : <Save className="mr-2 h-4 w-4" />}
+                <Button size="sm" onClick={handleSave} disabled={saving}>
+                  {saving ? <LoadingSpinner className="inline-flex py-0 mr-2" /> : <Save className="mr-1 h-4 w-4" />}
                   {saving ? '保存中...' : '保存设置'}
                 </Button>
               </CardContent>
@@ -164,24 +168,24 @@ export default function SettingsPage() {
 
             <div className="space-y-6">
               <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2"><Lock className="h-4 w-4" />修改密码</CardTitle>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-base flex items-center gap-2"><Lock className="h-4 w-4" />修改密码</CardTitle>
                   <CardDescription>输入当前密码并设置新密码</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div className="space-y-2"><Label>当前密码</Label><Input type="password" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} /></div>
                   <div className="space-y-2"><Label>新密码</Label><Input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder="至少6位" /></div>
                   <div className="space-y-2"><Label>确认新密码</Label><Input type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} /></div>
-                  <Button onClick={handleChangePassword} disabled={changingPwd}>
-                    {changingPwd ? <LoadingSpinner className="inline-flex py-0 mr-2" /> : <Lock className="mr-2 h-4 w-4" />}
+                  <Button size="sm" onClick={handleChangePassword} disabled={changingPwd}>
+                    {changingPwd ? <LoadingSpinner className="inline-flex py-0 mr-2" /> : <Lock className="mr-1 h-4 w-4" />}
                     {changingPwd ? '修改中...' : '修改密码'}
                   </Button>
                 </CardContent>
               </Card>
 
               <Card className="border-destructive/30">
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2 text-destructive"><AlertTriangle className="h-4 w-4" />删除账户</CardTitle>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-base flex items-center gap-2 text-destructive"><AlertTriangle className="h-4 w-4" />删除账户</CardTitle>
                   <CardDescription>
                     {canDeleteSelf
                       ? '删除后将立即退出登录，此操作不可撤销'
@@ -189,8 +193,8 @@ export default function SettingsPage() {
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
-                  <Button variant="destructive" onClick={() => { setDeletePassword(''); setShowDeleteDialog(true); }} disabled={!canDeleteSelf}>
-                    <Trash2 className="mr-2 h-4 w-4" />删除我的账户
+                  <Button variant="destructive" size="sm" onClick={() => { setDeletePassword(''); setShowDeleteDialog(true); }} disabled={!canDeleteSelf}>
+                    <Trash2 className="mr-1 h-4 w-4" />删除我的账户
                   </Button>
                 </CardContent>
               </Card>

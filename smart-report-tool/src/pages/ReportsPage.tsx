@@ -1,5 +1,6 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
+import { Sparkles, FileText } from 'lucide-react';
 import { ConfirmDialog } from '@/components/common/ConfirmDialog';
 import { ReportFilterBar } from '@/components/reports/ReportFilterBar';
 import { ReportListTable } from '@/components/reports/ReportListTable';
@@ -250,7 +251,10 @@ export default function ReportsPage() {
 
   return (
     <div className="space-y-6">
-      <h2 className="text-2xl font-bold tracking-tight">{activeTab === 'ai' ? 'AI报告' : '脚本报告'}</h2>
+      <h2 className="text-2xl font-bold tracking-tight flex items-center gap-2">
+        {activeTab === 'ai' ? <Sparkles className="h-6 w-6" /> : <FileText className="h-6 w-6" />}
+        {activeTab === 'ai' ? 'AI报告' : '脚本报告'}
+      </h2>
 
       <ReportFilterBar
         searchQuery={searchQuery}

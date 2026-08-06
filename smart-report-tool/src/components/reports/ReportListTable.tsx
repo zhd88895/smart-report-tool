@@ -61,18 +61,18 @@ export function ReportListTable({
       render: (item: Report) => {
         const isAI = (item.reportSource || 'script') === 'ai';
         return (
-        <div className="flex gap-2">
+        <div className="flex gap-1">
           {!isAI && (
-            <Button variant="ghost" size="sm" title="查看执行日志" onClick={() => onViewLogs(item)}>
+            <Button variant="ghost" size="icon" className="h-8 w-8" title="查看执行日志" onClick={() => onViewLogs(item)}>
               <FileText className="h-4 w-4" />
             </Button>
           )}
-          <Button variant="ghost" size="sm" title="查看报告文件" onClick={() => onViewFiles(item)}>
+          <Button variant="ghost" size="icon" className="h-8 w-8" title="查看报告文件" onClick={() => onViewFiles(item)}>
             <FolderOpen className="h-4 w-4" />
           </Button>
           {canDeleteReport(item) && (
-            <Button variant="ghost" size="sm" onClick={() => onDelete(item)}>
-              <Trash2 className="h-4 w-4 text-destructive" />
+            <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive" title="删除报告" onClick={() => onDelete(item)}>
+              <Trash2 className="h-4 w-4" />
             </Button>
           )}
         </div>
@@ -82,8 +82,8 @@ export function ReportListTable({
 
   return (
     <Card>
-      <CardHeader>
-        <CardTitle>报告列表</CardTitle>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-base">报告列表</CardTitle>
       </CardHeader>
       <CardContent>
         <DataTable columns={columns} data={reports} keyExtractor={(item) => item.id} sortKey={sortKey} sortDir={sortDir} onSortChange={onSortChange} />

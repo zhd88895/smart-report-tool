@@ -212,7 +212,7 @@ export default function AssistantPage() {
                       <p className="text-xs text-muted-foreground truncate">{lastMessagePreview(conv)}</p>
                     </div>
                     <Button
-                      variant="secondary" size="icon" className="h-7 w-7 shrink-0 opacity-100 hover:bg-destructive hover:text-destructive-foreground"
+                      variant="ghost" size="icon" className="h-7 w-7 shrink-0 text-destructive hover:text-destructive"
                       onClick={(e) => { e.stopPropagation(); setDeleteTarget(conv); }}
                       title="删除对话"
                     >
@@ -238,7 +238,7 @@ export default function AssistantPage() {
           <CardHeader className="border-b pb-3 shrink-0">
             <div className="flex items-center justify-between">
               <CardTitle className="text-base flex items-center gap-2">
-                <Bot className="h-5 w-5 text-primary" />智能助手
+                <Bot className="h-4 w-4 text-primary" />智能助手
                 <Badge variant="secondary" className="text-[10px] h-5">{displayModel}</Badge>
               </CardTitle>
               <div className="flex items-center gap-2">
@@ -350,7 +350,7 @@ export default function AssistantPage() {
                 </div>
               )}
             </div>
-            <div className="border-t bg-white p-4 shrink-0 z-10">
+            <div className="border-t p-4 shrink-0 z-10">
               <div className="flex items-end gap-2">
                 <Textarea
                   ref={textareaRef}

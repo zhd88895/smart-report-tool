@@ -26,7 +26,6 @@ import {
   SCRIPTS_DIR,
   TEMPLATES_DIR,
   UPLOADS_DIR,
-  VENV_PYTHON,
   getPipIndexUrl,
 } from '../config';
 import zlib from 'zlib';
@@ -2058,12 +2057,6 @@ export class ReportService {
     );
     if (existsSync(scriptVenv)) {
       return [scriptVenv, []];
-    }
-
-    // 其次使用全局虚拟环境
-    const globalVenv = VENV_PYTHON;
-    if (existsSync(globalVenv)) {
-      return [globalVenv, []];
     }
 
     // 最后查找系统 Python（支持 python / python3 / py 启动器）

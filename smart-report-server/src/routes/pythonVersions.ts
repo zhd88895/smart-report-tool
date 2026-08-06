@@ -12,7 +12,7 @@ import { execSync } from 'child_process';
 import { pythonVersionService } from '../services/pythonVersionService';
 import { authenticate, authorize, UserRole } from '../middleware/auth';
 import { ApiResponse, safeErrorMessage } from '../types';
-import { VENV_PYTHON, EMBEDDED_PYTHON, getPipIndexUrl } from '../config';
+import { EMBEDDED_PYTHON, getPipIndexUrl } from '../config';
 
 /**
  * 单个 Python 环境的探测结果
@@ -32,8 +32,6 @@ interface PythonEnvProbe {
 export interface PythonEnvironmentInfo {
   /** 内嵌 Python（data/python-embedded） */
   embedded: PythonEnvProbe;
-  /** 全局虚拟环境（data/venv） */
-  venv: PythonEnvProbe;
   /** 系统 PATH 中的 Python */
   system: PythonEnvProbe;
   /** 当前生效的 pip 镜像源地址 */
@@ -61,7 +59,7 @@ export class PythonVersionRoutes {
     // 获取已安装的 Python 版本列表
     this.router.get('/installed', authenticate, this.getInstalledVersions.bind(this));
 
-    // 获取脚本运行环境信息（内嵌 Python / 全局 venv / 系统 Python / pip 镜像源）
+    // 获取脚本运行环境信息（内嵌 Python / 系统 Python / pip 镜像源）
     this.router.get('/environment', authenticate, this.getEnvironmentInfo.bind(this));
 
     // 下载并安装指定版本的 Python
@@ -131,7 +129,6 @@ export class PythonVersionRoutes {
    *
    * 通过运行各 Python 的 --version 命令探测：
    * - 内嵌 Python（data/python-embedded/python.exe）
-   * - 全局虚拟环境（data/venv/Scripts/python.exe）
    * - 系统 PATH 中的 Python
    * 同时返回当前生效的 pip 镜像源地址。
    */
@@ -184,7 +181,6 @@ export class PythonVersionRoutes {
     try {
       const info: PythonEnvironmentInfo = {
         embedded: probePython(EMBEDDED_PYTHON),
-        venv: probePython(VENV_PYTHON),
         system: probeSystemPython(),
         pipIndexUrl: getPipIndexUrl(),
       };

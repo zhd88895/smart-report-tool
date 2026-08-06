@@ -32,8 +32,8 @@ export function StepScript({
 }: StepScriptProps) {
   return (
     <Card>
-      <CardHeader>
-        <CardTitle>步骤1：选择脚本</CardTitle>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-base">步骤1：选择脚本</CardTitle>
         <p className="text-sm text-muted-foreground">请选择用于处理巡检数据的脚本</p>
       </CardHeader>
       <CardContent className="space-y-4">

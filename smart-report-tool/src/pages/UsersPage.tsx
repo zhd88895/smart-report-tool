@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { Plus, Trash2, CheckCircle, XCircle, Pencil, KeyRound, Search, X as XIcon } from 'lucide-react';
+import { Plus, Trash2, CheckCircle, XCircle, Pencil, KeyRound, Search, X as XIcon, Users as UsersIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -196,14 +196,14 @@ export default function UsersPage() {
       render: (item: User) => (
         item.id === currentUser?.id ? null : (
           <div className="flex gap-1">
-            <Button variant="ghost" size="sm" title="编辑用户" onClick={() => openEdit(item)}>
+            <Button variant="ghost" size="icon" className="h-8 w-8" title="编辑用户" onClick={() => openEdit(item)}>
               <Pencil className="h-4 w-4" />
             </Button>
-            <Button variant="ghost" size="sm" title="重置密码" onClick={() => { setPwdTarget(item); setResetPwd(''); }}>
+            <Button variant="ghost" size="icon" className="h-8 w-8" title="重置密码" onClick={() => { setPwdTarget(item); setResetPwd(''); }}>
               <KeyRound className="h-4 w-4" />
             </Button>
-            <Button variant="ghost" size="sm" title="删除用户" onClick={() => handleDeleteClick(item)}>
-              <Trash2 className="h-4 w-4 text-destructive" />
+            <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive" title="删除用户" onClick={() => handleDeleteClick(item)}>
+              <Trash2 className="h-4 w-4" />
             </Button>
           </div>
         )
@@ -219,12 +219,12 @@ export default function UsersPage() {
       key: 'actions',
       header: '操作',
       render: (item: User) => (
-        <div className="flex gap-2">
-          <Button variant="ghost" size="sm" onClick={() => handleApprove(item.id)}>
-            <CheckCircle className="h-4 w-4 text-green-600" />
+        <div className="flex gap-1">
+          <Button variant="ghost" size="icon" className="h-8 w-8" title="批准" onClick={() => handleApprove(item.id)}>
+            <CheckCircle className="h-4 w-4 text-primary" />
           </Button>
-          <Button variant="ghost" size="sm" onClick={() => handleReject(item.id)}>
-            <XCircle className="h-4 w-4 text-red-600" />
+          <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive" title="拒绝" onClick={() => handleReject(item.id)}>
+            <XCircle className="h-4 w-4" />
           </Button>
         </div>
       ),
@@ -233,10 +233,12 @@ export default function UsersPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-bold tracking-tight">用户管理</h2>
-        <Button onClick={() => setShowAddDialog(true)}>
-          <Plus className="mr-2 h-4 w-4" />添加用户
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <h2 className="text-2xl font-bold tracking-tight flex items-center gap-2">
+          <UsersIcon className="h-6 w-6" />用户管理
+        </h2>
+        <Button size="sm" onClick={() => setShowAddDialog(true)}>
+          <Plus className="mr-1 h-4 w-4" />添加用户
         </Button>
       </div>
 
@@ -244,12 +246,12 @@ export default function UsersPage() {
         <TabsList>
           <TabsTrigger value="all">全部用户</TabsTrigger>
           <TabsTrigger value="pending">
-            待审核{pendingUsers.length > 0 && <span className="ml-1 px-1.5 py-0.5 bg-red-500 text-white text-xs rounded-full">{pendingUsers.length}</span>}
+            待审核{pendingUsers.length > 0 && <span className="ml-1 px-1.5 py-0.5 bg-destructive text-destructive-foreground text-xs rounded-full">{pendingUsers.length}</span>}
           </TabsTrigger>
         </TabsList>
-        <TabsContent value="all">
+        <TabsContent value="all" className="mt-4">
           <Card>
-            <CardHeader><CardTitle>用户列表</CardTitle></CardHeader>
+            <CardHeader className="pb-2"><CardTitle className="text-base">用户列表</CardTitle></CardHeader>
             <CardContent className="space-y-4">
               {/* 搜索 + 筛选 */}
               <div className="space-y-3">
@@ -313,9 +315,9 @@ export default function UsersPage() {
             </CardContent>
           </Card>
         </TabsContent>
-        <TabsContent value="pending">
+        <TabsContent value="pending" className="mt-4">
           <Card>
-            <CardHeader><CardTitle>待审核用户</CardTitle></CardHeader>
+            <CardHeader className="pb-2"><CardTitle className="text-base">待审核用户</CardTitle></CardHeader>
             <CardContent>
               <DataTable columns={pendingColumns} data={pendingUsers} keyExtractor={(item) => item.id} />
             </CardContent>

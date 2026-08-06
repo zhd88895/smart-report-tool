@@ -30,7 +30,7 @@ export function StepConfirm({
 }: StepConfirmProps) {
   return (
     <Card>
-      <CardHeader><CardTitle>步骤5：确认并生成报告</CardTitle></CardHeader>
+      <CardHeader className="pb-2"><CardTitle className="text-base">步骤5：确认并生成报告</CardTitle></CardHeader>
       <CardContent className="space-y-4">
         <div className="rounded-lg border p-4 space-y-2 text-sm">
           <div className="flex justify-between"><span className="text-muted-foreground">报告名称：</span><span>{reportInfo.name}</span></div>
