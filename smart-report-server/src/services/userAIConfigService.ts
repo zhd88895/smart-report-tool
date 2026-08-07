@@ -23,6 +23,7 @@ import {
   fetchRemoteModels,
   testProviderConnection,
   testModelConnection,
+  getKnownModelLimits,
   type VendorKey,
 } from './aiProviderService';
 
@@ -55,6 +56,8 @@ export interface ModelDTO {
   temperature: number;
   maxInputTokens: number;
   maxOutputTokens: number;
+  /** 官方已知上下文/输出上限（未收录的模型为 null），供前端提示与一键填满 */
+  knownLimits: { maxInputTokens?: number; maxOutputTokens?: number } | null;
   enabled: boolean;
   isDefault: boolean;
   createdAt: string;
@@ -119,6 +122,16 @@ function toProviderDTO(p: UserAIProvider, modelCount?: number): ProviderDTO {
   };
 }
 
+/** 查官方已知上限并转成仓储层创建参数（未收录返回空对象，走数据库默认值） */
+function limitsForModel(modelId: string): { max_input_tokens?: number; max_output_tokens?: number } {
+  const known = getKnownModelLimits(modelId);
+  if (!known) return {};
+  return {
+    ...(known.maxInputTokens !== undefined ? { max_input_tokens: known.maxInputTokens } : {}),
+    ...(known.maxOutputTokens !== undefined ? { max_output_tokens: known.maxOutputTokens } : {}),
+  };
+}
+
 /** 数据库模型行 → 前端 DTO */
 function toModelDTO(m: UserAIModel): ModelDTO {
   return {
@@ -129,6 +142,7 @@ function toModelDTO(m: UserAIModel): ModelDTO {
     temperature: m.temperature,
     maxInputTokens: m.max_input_tokens,
     maxOutputTokens: m.max_output_tokens,
+    knownLimits: getKnownModelLimits(m.model_id),
     enabled: m.enabled === 1,
     isDefault: m.is_default === 1,
     createdAt: m.created_at,
@@ -291,6 +305,8 @@ export const userAIConfigService = {
     const created = await userAIConfigRepository.createModel(userId, providerId, {
       model_id: modelId,
       display_name: data.displayName?.trim() || undefined,
+      // 已收录官方规格的模型自动填充真实上下文/输出上限，未收录的用数据库默认值
+      ...limitsForModel(modelId),
     });
     await this.ensureDefaultIfNone(userId, created.id);
     const fresh = await userAIConfigRepository.getModel(userId, created.id);
@@ -387,7 +403,7 @@ export const userAIConfigService = {
         skippedCount++;
         continue;
       }
-      const created = await userAIConfigRepository.createModel(userId, providerId, { model_id: modelId });
+      const created = await userAIConfigRepository.createModel(userId, providerId, { model_id: modelId, ...limitsForModel(modelId) });
       imported.push(toModelDTO(created));
       existingIds.add(modelId);
     }

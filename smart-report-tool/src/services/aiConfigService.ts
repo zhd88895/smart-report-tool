@@ -78,6 +78,8 @@ export interface AIModel {
   temperature: number;
   maxInputTokens: number;
   maxOutputTokens: number;
+  /** 官方已知上下文/输出上限（后端按模型规格表返回，未收录为 null） */
+  knownLimits?: { maxInputTokens?: number; maxOutputTokens?: number } | null;
   enabled: boolean;
   isDefault: boolean;
   createdAt: string;

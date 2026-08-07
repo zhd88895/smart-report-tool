@@ -167,18 +167,19 @@ export const userAIConfigRepository = {
     return (row as UserAIModel) || null;
   },
 
-  /** 创建模型，display_name 缺省回退为 model_id，其余参数用数据库默认值 */
+  /** 创建模型，display_name 缺省回退为 model_id；显式传入 token 上限时写入，否则用数据库默认值 */
   async createModel(
     userId: string,
     providerId: string,
-    data: { model_id: string; display_name?: string }
+    data: { model_id: string; display_name?: string; max_input_tokens?: number; max_output_tokens?: number }
   ): Promise<UserAIModel> {
     const now = new Date().toISOString();
     const id = genId('uaim');
     await runAsync(
-      `INSERT INTO user_ai_models (id, provider_id, user_id, model_id, display_name, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [id, providerId, userId, data.model_id, data.display_name || data.model_id, now, now]
+      `INSERT INTO user_ai_models (id, provider_id, user_id, model_id, display_name, max_input_tokens, max_output_tokens, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, COALESCE(?, 128000), COALESCE(?, 4096), ?, ?)`,
+      [id, providerId, userId, data.model_id, data.display_name || data.model_id,
+       data.max_input_tokens ?? null, data.max_output_tokens ?? null, now, now]
     );
     // 重新读取以拿到数据库默认值（temperature / max_tokens / enabled / is_default）
     const row = await getAsync(`SELECT * FROM user_ai_models WHERE id = ?`, [id]);

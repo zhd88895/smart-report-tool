@@ -107,12 +107,17 @@ export function ModelDialog({ open, onOpenChange, providerId, editingModel, onSa
         }
         toast.success('模型已更新');
       } else {
-        // 创建接口只收 modelId/displayName，其余参数创建后再更新
+        // 创建接口只收 modelId/displayName；已收录官方规格的模型由后端自动填充真实上限，
+        // 因此这里只把用户手动改过的字段补丁式更新，没用默认值覆盖后端的自动填充
         const created = await createModel(providerId, {
           modelId: form.modelId.trim(),
           displayName: form.displayName.trim() || form.modelId.trim(),
         });
-        await updateModel(created.id, { temperature, maxInputTokens, maxOutputTokens });
+        const patch: { temperature?: number; maxInputTokens?: number; maxOutputTokens?: number } = {};
+        if (form.temperature !== EMPTY_MODEL_FORM.temperature) patch.temperature = temperature;
+        if (form.maxInputTokens !== EMPTY_MODEL_FORM.maxInputTokens) patch.maxInputTokens = maxInputTokens;
+        if (form.maxOutputTokens !== EMPTY_MODEL_FORM.maxOutputTokens) patch.maxOutputTokens = maxOutputTokens;
+        if (Object.keys(patch).length > 0) await updateModel(created.id, patch);
         if (form.isDefault) await setDefaultModel(created.id);
         toast.success('模型已添加');
       }
@@ -199,6 +204,27 @@ export function ModelDialog({ open, onOpenChange, providerId, editingModel, onSa
               />
             </div>
           </div>
+          {/* 已收录官方规格的模型：展示官方上限并支持一键填入 */}
+          {editingModel?.knownLimits && (
+            <div className="flex items-center justify-between rounded-md bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
+              <span>
+                官方上限：输入 {editingModel.knownLimits.maxInputTokens?.toLocaleString() ?? '未收录'}
+                {editingModel.knownLimits.maxOutputTokens != null && ` / 输出 ${editingModel.knownLimits.maxOutputTokens.toLocaleString()}`}
+              </span>
+              <Button
+                type="button" variant="link" size="sm" className="h-auto p-0 text-xs"
+                onClick={() => setForm((f) => ({
+                  ...f,
+                  ...(editingModel.knownLimits?.maxInputTokens != null
+                    ? { maxInputTokens: String(editingModel.knownLimits.maxInputTokens) } : {}),
+                  ...(editingModel.knownLimits?.maxOutputTokens != null
+                    ? { maxOutputTokens: String(editingModel.knownLimits.maxOutputTokens) } : {}),
+                }))}
+              >
+                填入官方上限
+              </Button>
+            </div>
+          )}
           <div className="flex items-center justify-between rounded-md border p-3">
             <Label className="cursor-pointer">设为默认模型</Label>
             <Switch

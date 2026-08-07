@@ -59,6 +59,44 @@ export const VENDOR_QUIRKS: Record<VendorKey, VendorQuirks> = {
   custom:  { key: 'custom',  name: '自定义',      defaultBaseUrl: '',                                                authHeader: 'Authorization', authPrefix: 'Bearer ', tokenParam: 'max_tokens',            supportsStreamUsage: false, defaultModels: [] },
 };
 
+// ═══════════════════════════════════════════════════════
+//  已知模型规格表
+// ═══════════════════════════════════════════════════════
+//
+// 各厂商的 /models 接口均不返回上下文/输出上限元数据（已实测 MiMo、DeepSeek、
+// OpenCode Go 均只返回 id/object/owned_by），因此这里按官方文档维护一份已知
+// 模型规格表，用于：添加/导入模型时自动填充上限、前端展示官方上限提示。
+// 按 model_id 前缀匹配（长前缀在前），未命中时回退数据库默认值。
+// 只收录已从官方渠道确认过的数值，宁可空缺也不猜。
+
+/** 已知模型的官方上下文/输出上限 */
+export interface KnownModelLimits {
+  /** 官方上下文窗口（输入上限） */
+  maxInputTokens?: number;
+  /** 官方单次最大输出 */
+  maxOutputTokens?: number;
+}
+
+const MODEL_KNOWN_LIMITS: Array<{ match: string; limits: KnownModelLimits }> = [
+  // DeepSeek V4 系列：官方 API 文档 1M 上下文、最大输出 384K（OpenCode Go 同模型 ID 亦覆盖）
+  { match: 'deepseek-v4-flash', limits: { maxInputTokens: 1048576, maxOutputTokens: 393216 } },
+  { match: 'deepseek-v4-pro',   limits: { maxInputTokens: 1048576, maxOutputTokens: 393216 } },
+  // 小米 MiMo-V2.5 系列：官方 1M 上下文（输出上限官方未明示，不填）
+  { match: 'mimo-v2.5',         limits: { maxInputTokens: 1048576 } },
+];
+
+/** 按模型 ID 前缀查官方已知上限，未收录返回 null */
+export function getKnownModelLimits(modelId: string): KnownModelLimits | null {
+  const id = (modelId || '').toLowerCase();
+  for (const entry of MODEL_KNOWN_LIMITS) {
+    if (id.startsWith(entry.match)) return entry.limits;
+  }
+  return null;
+}
+
+/** 输出 token 的全局安全天花板（DeepSeek V4 官方最大输出 384K 为目前最高） */
+export const OUTPUT_TOKEN_CEILING = 393216;
+
 /** 工具调用（模型返回） */
 export interface AIToolCall {
   id: string;
@@ -156,7 +194,7 @@ async function resolveConfig(userId: string, modelId?: string): Promise<Resolved
       baseUrl: env.MIMO_BASE_URL || 'https://token-plan-cn.xiaomimimo.com/v1',
       model: env.MIMO_MODEL || 'mimo-v2.5-pro',
       maxInputTokens: 128000,
-      maxOutputTokens: Math.min(env.MIMO_MAX_TOKENS || 4096, 131072),
+      maxOutputTokens: Math.min(env.MIMO_MAX_TOKENS || 4096, OUTPUT_TOKEN_CEILING),
       temperature: 0.7,
       quirks: VENDOR_QUIRKS.mimo,
       modelDbId: null,
@@ -251,7 +289,7 @@ function buildRequestBody(
     model: cfg.model,
     messages: truncateMessages(req.messages, cfg.maxInputTokens),
     // 按厂商 quirks 选择 token 参数名，并裁剪到模型上限
-    [cfg.quirks.tokenParam]: Math.min(req.maxOutputTokens ?? cfg.maxOutputTokens, 131072),
+    [cfg.quirks.tokenParam]: Math.min(req.maxOutputTokens ?? cfg.maxOutputTokens, OUTPUT_TOKEN_CEILING),
     temperature: req.temperature ?? cfg.temperature,
     stream,
     ...(req.tools?.length ? { tools: req.tools, tool_choice: 'auto' } : {}),

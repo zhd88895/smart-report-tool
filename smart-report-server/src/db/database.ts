@@ -519,6 +519,17 @@ async function createSchema(): Promise<void> {
   )`);
   await runAsync(`CREATE INDEX IF NOT EXISTS idx_analysis_tasks_user ON analysis_tasks(user_id, created_at)`);
   await runAsync(`CREATE INDEX IF NOT EXISTS idx_analysis_tasks_status ON analysis_tasks(status, created_at)`);
+
+  // 迁移：已收录官方 1M 上下文规格的模型，若输入上限仍是旧默认值 128000（用户未手动改过），
+  // 自动提升到官方上下文上限 1048576，避免截断浪费模型能力；用户手动调过的值不动
+  await runAsync(
+    `UPDATE user_ai_models SET max_input_tokens = 1048576, updated_at = ?
+     WHERE max_input_tokens = 128000 AND (
+       model_id LIKE 'mimo-v2.5%' OR model_id LIKE 'Mimo-v2.5%' OR
+       model_id LIKE 'deepseek-v4-%' OR model_id LIKE 'DeepSeek-V4-%'
+     )`,
+    [new Date().toISOString()]
+  );
 }
 
 /**
