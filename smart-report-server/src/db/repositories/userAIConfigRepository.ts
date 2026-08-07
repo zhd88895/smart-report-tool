@@ -42,6 +42,14 @@ export interface UserAIModel {
   temperature: number;
   max_input_tokens: number;
   max_output_tokens: number;
+  /** 能力声明：是否支持工具调用（0/1） */
+  supports_tools: number;
+  /** 能力声明：是否支持图片输入（0/1），当前仅作元数据记录 */
+  supports_vision: number;
+  /** 能力声明：是否支持思考模式（0/1） */
+  thinking_mode: number;
+  /** 思考强度：'' 自动 / low / medium / high；仅 thinking_mode=1 时有意义 */
+  reasoning_effort: string;
   enabled: number;
   is_default: number;
   created_at: string;
@@ -186,11 +194,11 @@ export const userAIConfigRepository = {
     return row as UserAIModel;
   },
 
-  /** 部分更新模型字段（display_name/temperature/max_input_tokens/max_output_tokens/enabled） */
+  /** 部分更新模型字段（display_name/temperature/token上限/能力声明/enabled） */
   async updateModel(
     userId: string,
     id: string,
-    patch: Partial<Pick<UserAIModel, 'display_name' | 'temperature' | 'max_input_tokens' | 'max_output_tokens' | 'enabled'>>
+    patch: Partial<Pick<UserAIModel, 'display_name' | 'temperature' | 'max_input_tokens' | 'max_output_tokens' | 'supports_tools' | 'supports_vision' | 'thinking_mode' | 'reasoning_effort' | 'enabled'>>
   ): Promise<void> {
     const fields: string[] = [];
     const values: any[] = [];
@@ -198,6 +206,10 @@ export const userAIConfigRepository = {
     if (patch.temperature !== undefined) { fields.push('temperature = ?'); values.push(patch.temperature); }
     if (patch.max_input_tokens !== undefined) { fields.push('max_input_tokens = ?'); values.push(patch.max_input_tokens); }
     if (patch.max_output_tokens !== undefined) { fields.push('max_output_tokens = ?'); values.push(patch.max_output_tokens); }
+    if (patch.supports_tools !== undefined) { fields.push('supports_tools = ?'); values.push(patch.supports_tools); }
+    if (patch.supports_vision !== undefined) { fields.push('supports_vision = ?'); values.push(patch.supports_vision); }
+    if (patch.thinking_mode !== undefined) { fields.push('thinking_mode = ?'); values.push(patch.thinking_mode); }
+    if (patch.reasoning_effort !== undefined) { fields.push('reasoning_effort = ?'); values.push(patch.reasoning_effort); }
     if (patch.enabled !== undefined) { fields.push('enabled = ?'); values.push(patch.enabled); }
     fields.push('updated_at = ?'); values.push(new Date().toISOString());
     values.push(id, userId);

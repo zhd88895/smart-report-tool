@@ -58,6 +58,14 @@ export interface ModelDTO {
   maxOutputTokens: number;
   /** 官方已知上下文/输出上限（未收录的模型为 null），供前端提示与一键填满 */
   knownLimits: { maxInputTokens?: number; maxOutputTokens?: number } | null;
+  /** 能力声明：工具调用 */
+  supportsTools: boolean;
+  /** 能力声明：图片输入（当前仅作元数据记录） */
+  supportsVision: boolean;
+  /** 能力声明：思考模式 */
+  thinkingMode: boolean;
+  /** 思考强度：'' 自动 / low / medium / high */
+  reasoningEffort: string;
   enabled: boolean;
   isDefault: boolean;
   createdAt: string;
@@ -143,6 +151,10 @@ function toModelDTO(m: UserAIModel): ModelDTO {
     maxInputTokens: m.max_input_tokens,
     maxOutputTokens: m.max_output_tokens,
     knownLimits: getKnownModelLimits(m.model_id),
+    supportsTools: (m.supports_tools ?? 1) === 1,
+    supportsVision: m.supports_vision === 1,
+    thinkingMode: m.thinking_mode === 1,
+    reasoningEffort: m.reasoning_effort ?? '',
     enabled: m.enabled === 1,
     isDefault: m.is_default === 1,
     createdAt: m.created_at,
@@ -325,12 +337,16 @@ export const userAIConfigService = {
       temperature?: number;
       maxInputTokens?: number;
       maxOutputTokens?: number;
+      supportsTools?: boolean;
+      supportsVision?: boolean;
+      thinkingMode?: boolean;
+      reasoningEffort?: string;
     }
   ): Promise<ModelDTO | null> {
     const existing = await userAIConfigRepository.getModel(userId, id);
     if (!existing) return null;
 
-    const repoPatch: Partial<Pick<UserAIModel, 'display_name' | 'temperature' | 'max_input_tokens' | 'max_output_tokens'>> = {};
+    const repoPatch: Partial<Pick<UserAIModel, 'display_name' | 'temperature' | 'max_input_tokens' | 'max_output_tokens' | 'supports_tools' | 'supports_vision' | 'thinking_mode' | 'reasoning_effort'>> = {};
     if (patch.displayName !== undefined) {
       if (!patch.displayName.trim()) throw new Error('显示名不能为空');
       repoPatch.display_name = patch.displayName.trim();
@@ -352,6 +368,15 @@ export const userAIConfigService = {
         throw new Error('maxOutputTokens 必须是正整数');
       }
       repoPatch.max_output_tokens = patch.maxOutputTokens;
+    }
+    if (patch.supportsTools !== undefined) repoPatch.supports_tools = patch.supportsTools ? 1 : 0;
+    if (patch.supportsVision !== undefined) repoPatch.supports_vision = patch.supportsVision ? 1 : 0;
+    if (patch.thinkingMode !== undefined) repoPatch.thinking_mode = patch.thinkingMode ? 1 : 0;
+    if (patch.reasoningEffort !== undefined) {
+      if (!['', 'low', 'medium', 'high'].includes(patch.reasoningEffort)) {
+        throw new Error('reasoningEffort 必须是 auto/low/medium/high 之一');
+      }
+      repoPatch.reasoning_effort = patch.reasoningEffort;
     }
     await userAIConfigRepository.updateModel(userId, id, repoPatch);
     const updated = await userAIConfigRepository.getModel(userId, id);

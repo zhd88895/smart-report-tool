@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { CheckCircle2, Gauge, XCircle, Zap } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
@@ -21,13 +23,28 @@ interface ModelForm {
   temperature: string;
   maxInputTokens: string;
   maxOutputTokens: string;
+  supportsTools: boolean;
+  supportsVision: boolean;
+  thinkingMode: boolean;
+  reasoningEffort: string;
   isDefault: boolean;
 }
 
 const EMPTY_MODEL_FORM: ModelForm = {
   modelId: '', displayName: '', temperature: '0.7',
-  maxInputTokens: '128000', maxOutputTokens: '4096', isDefault: false,
+  maxInputTokens: '128000', maxOutputTokens: '4096',
+  supportsTools: true, supportsVision: false, thinkingMode: false, reasoningEffort: '',
+  isDefault: false,
 };
+
+/** 输入/输出上限快捷档位 */
+const INPUT_TOKEN_CHIPS = [32000, 64000, 128000, 256000, 1048576] as const;
+const OUTPUT_TOKEN_CHIPS = [4096, 8192, 16384, 32768, 131072] as const;
+
+/** 档位显示文案：>=1M 显示 1M，否则 K */
+function formatChip(v: number): string {
+  return v >= 1048576 ? '1M' : `${Math.round(v / 1024)}K`;
+}
 
 interface ModelDialogProps {
   open: boolean;
@@ -61,6 +78,10 @@ export function ModelDialog({ open, onOpenChange, providerId, editingModel, onSa
         temperature: String(editingModel.temperature),
         maxInputTokens: String(editingModel.maxInputTokens),
         maxOutputTokens: String(editingModel.maxOutputTokens),
+        supportsTools: editingModel.supportsTools,
+        supportsVision: editingModel.supportsVision,
+        thinkingMode: editingModel.thinkingMode,
+        reasoningEffort: editingModel.reasoningEffort,
         isDefault: editingModel.isDefault,
       });
     } else {
@@ -153,6 +174,10 @@ export function ModelDialog({ open, onOpenChange, providerId, editingModel, onSa
         await updateModel(editingModel.id, {
           displayName: form.displayName.trim() || form.modelId.trim(),
           temperature, maxInputTokens, maxOutputTokens,
+          supportsTools: form.supportsTools,
+          supportsVision: form.supportsVision,
+          thinkingMode: form.thinkingMode,
+          reasoningEffort: form.thinkingMode ? form.reasoningEffort : '',
         });
         if (form.isDefault && !editingModel.isDefault) {
           await setDefaultModel(editingModel.id);
@@ -165,10 +190,14 @@ export function ModelDialog({ open, onOpenChange, providerId, editingModel, onSa
           modelId: form.modelId.trim(),
           displayName: form.displayName.trim() || form.modelId.trim(),
         });
-        const patch: { temperature?: number; maxInputTokens?: number; maxOutputTokens?: number } = {};
+        const patch: Parameters<typeof updateModel>[1] = {};
         if (form.temperature !== EMPTY_MODEL_FORM.temperature) patch.temperature = temperature;
         if (form.maxInputTokens !== EMPTY_MODEL_FORM.maxInputTokens) patch.maxInputTokens = maxInputTokens;
         if (form.maxOutputTokens !== EMPTY_MODEL_FORM.maxOutputTokens) patch.maxOutputTokens = maxOutputTokens;
+        if (form.supportsTools !== EMPTY_MODEL_FORM.supportsTools) patch.supportsTools = form.supportsTools;
+        if (form.supportsVision !== EMPTY_MODEL_FORM.supportsVision) patch.supportsVision = form.supportsVision;
+        if (form.thinkingMode !== EMPTY_MODEL_FORM.thinkingMode) patch.thinkingMode = form.thinkingMode;
+        if (form.thinkingMode && form.reasoningEffort !== EMPTY_MODEL_FORM.reasoningEffort) patch.reasoningEffort = form.reasoningEffort;
         if (Object.keys(patch).length > 0) await updateModel(created.id, patch);
         if (form.isDefault) await setDefaultModel(created.id);
         toast.success('模型已添加');
@@ -184,7 +213,7 @@ export function ModelDialog({ open, onOpenChange, providerId, editingModel, onSa
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent className="max-h-[88vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{editingModel ? '编辑模型' : '添加模型'}</DialogTitle>
           <DialogDescription>模型 ID 需与厂商接口返回的标识一致</DialogDescription>
@@ -301,6 +330,21 @@ export function ModelDialog({ open, onOpenChange, providerId, editingModel, onSa
                 value={form.maxInputTokens}
                 onChange={(e) => setForm((f) => ({ ...f, maxInputTokens: e.target.value }))}
               />
+              <div className="flex flex-wrap gap-1">
+                {INPUT_TOKEN_CHIPS.map((v) => (
+                  <button
+                    key={v} type="button"
+                    className={`rounded border px-1.5 py-0.5 text-[11px] leading-4 transition-colors ${
+                      form.maxInputTokens === String(v)
+                        ? 'border-primary bg-primary/10 text-primary'
+                        : 'border-border text-muted-foreground hover:border-primary/50 hover:text-foreground'
+                    }`}
+                    onClick={() => setForm((f) => ({ ...f, maxInputTokens: String(v) }))}
+                  >
+                    {formatChip(v)}
+                  </button>
+                ))}
+              </div>
             </div>
             <div className="space-y-2">
               <Label>输出上限</Label>
@@ -309,6 +353,21 @@ export function ModelDialog({ open, onOpenChange, providerId, editingModel, onSa
                 value={form.maxOutputTokens}
                 onChange={(e) => setForm((f) => ({ ...f, maxOutputTokens: e.target.value }))}
               />
+              <div className="flex flex-wrap gap-1">
+                {OUTPUT_TOKEN_CHIPS.map((v) => (
+                  <button
+                    key={v} type="button"
+                    className={`rounded border px-1.5 py-0.5 text-[11px] leading-4 transition-colors ${
+                      form.maxOutputTokens === String(v)
+                        ? 'border-primary bg-primary/10 text-primary'
+                        : 'border-border text-muted-foreground hover:border-primary/50 hover:text-foreground'
+                    }`}
+                    onClick={() => setForm((f) => ({ ...f, maxOutputTokens: String(v) }))}
+                  >
+                    {formatChip(v)}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
           {/* 已收录官方规格的模型：展示官方上限并支持一键填入 */}
@@ -332,6 +391,57 @@ export function ModelDialog({ open, onOpenChange, providerId, editingModel, onSa
               </Button>
             </div>
           )}
+          {/* 高级配置：模型能力声明（参考 workbuddy 设置项，保持本项目风格） */}
+          <div className="space-y-3 rounded-md border p-3">
+            <Label className="text-sm font-medium">高级配置</Label>
+            <div className="grid grid-cols-3 gap-2">
+              <label className="flex items-center gap-2 text-sm cursor-pointer">
+                <Checkbox
+                  checked={form.supportsTools}
+                  onCheckedChange={(v) => setForm((f) => ({ ...f, supportsTools: v === true }))}
+                />
+                工具调用
+              </label>
+              <label className="flex items-center gap-2 text-sm cursor-pointer">
+                <Checkbox
+                  checked={form.supportsVision}
+                  onCheckedChange={(v) => setForm((f) => ({ ...f, supportsVision: v === true }))}
+                />
+                图片输入
+              </label>
+              <label className="flex items-center gap-2 text-sm cursor-pointer">
+                <Checkbox
+                  checked={form.thinkingMode}
+                  onCheckedChange={(v) => setForm((f) => ({ ...f, thinkingMode: v === true }))}
+                />
+                思考模式
+              </label>
+            </div>
+            {!form.supportsTools && (
+              <p className="text-xs text-amber-600 dark:text-amber-400">
+                关闭「工具调用」后，支持包分析、脚本读写等需要工具的功能将无法使用此模型
+              </p>
+            )}
+            {form.thinkingMode && (
+              <div className="space-y-1.5">
+                <Label className="text-xs text-muted-foreground">默认思考强度</Label>
+                <Select
+                  value={form.reasoningEffort || 'auto'}
+                  onValueChange={(v) => setForm((f) => ({ ...f, reasoningEffort: v === 'auto' ? '' : v }))}
+                >
+                  <SelectTrigger className="h-8 text-sm">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="auto">自动（使用厂商默认值）</SelectItem>
+                    <SelectItem value="low">低</SelectItem>
+                    <SelectItem value="medium">中</SelectItem>
+                    <SelectItem value="high">高</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+          </div>
           <div className="flex items-center justify-between rounded-md border p-3">
             <Label className="cursor-pointer">设为默认模型</Label>
             <Switch

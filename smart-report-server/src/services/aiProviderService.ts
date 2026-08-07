@@ -151,6 +151,10 @@ export interface ResolvedConfig {
   maxInputTokens: number;
   maxOutputTokens: number;
   temperature: number;
+  /** 模型能力声明：是否支持工具调用（DB 模型；兜底配置视为支持） */
+  supportsTools: boolean;
+  /** 思考强度：'' 表示不传（自动）；low/medium/high 时请求体带 reasoning_effort */
+  reasoningEffort: string;
   quirks: VendorQuirks;
   /** 数据库模型记录 ID；兜底时为 null（不写用量日志） */
   modelDbId: string | null;
@@ -180,6 +184,8 @@ export async function resolveConfig(userId: string, modelId?: string): Promise<R
       maxInputTokens: row.max_input_tokens,
       maxOutputTokens: row.max_output_tokens,
       temperature: row.temperature,
+      supportsTools: (row.supports_tools ?? 1) === 1,
+      reasoningEffort: row.thinking_mode === 1 ? (row.reasoning_effort ?? '') : '',
       quirks,
       modelDbId: row.id,
       providerName: row.provider.name,
@@ -196,6 +202,8 @@ export async function resolveConfig(userId: string, modelId?: string): Promise<R
       maxInputTokens: 128000,
       maxOutputTokens: Math.min(env.MIMO_MAX_TOKENS || 4096, OUTPUT_TOKEN_CEILING),
       temperature: 0.7,
+      supportsTools: true,
+      reasoningEffort: '',
       quirks: VENDOR_QUIRKS.mimo,
       modelDbId: null,
       providerName: '系统默认',
@@ -285,6 +293,10 @@ function buildRequestBody(
   req: UserAIRequest,
   stream: boolean
 ): Record<string, any> {
+  // 模型声明不支持工具调用时给出明确报错，避免上游返回难懂的错误
+  if (req.tools?.length && !cfg.supportsTools) {
+    throw new Error(`模型 ${cfg.model} 未声明支持「工具调用」，此功能需要支持工具调用的模型，请在 AI 设置中调整模型能力或更换模型`);
+  }
   const body: Record<string, any> = {
     model: cfg.model,
     messages: truncateMessages(req.messages, cfg.maxInputTokens),
@@ -293,6 +305,8 @@ function buildRequestBody(
     temperature: req.temperature ?? cfg.temperature,
     stream,
     ...(req.tools?.length ? { tools: req.tools, tool_choice: 'auto' } : {}),
+    // 思考强度（OpenAI 兼容 reasoning_effort）：仅在模型开启思考模式且用户选择了档位时传
+    ...(cfg.reasoningEffort ? { reasoning_effort: cfg.reasoningEffort } : {}),
   };
   return body;
 }

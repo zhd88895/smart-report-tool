@@ -80,6 +80,14 @@ export interface AIModel {
   maxOutputTokens: number;
   /** 官方已知上下文/输出上限（后端按模型规格表返回，未收录为 null） */
   knownLimits?: { maxInputTokens?: number; maxOutputTokens?: number } | null;
+  /** 能力声明：工具调用 */
+  supportsTools: boolean;
+  /** 能力声明：图片输入（当前仅作元数据记录） */
+  supportsVision: boolean;
+  /** 能力声明：思考模式 */
+  thinkingMode: boolean;
+  /** 思考强度：'' 自动 / low / medium / high */
+  reasoningEffort: string;
   enabled: boolean;
   isDefault: boolean;
   createdAt: string;
@@ -173,7 +181,10 @@ export async function createModel(
 
 export async function updateModel(
   id: string,
-  data: { displayName?: string; temperature?: number; maxInputTokens?: number; maxOutputTokens?: number }
+  data: {
+    displayName?: string; temperature?: number; maxInputTokens?: number; maxOutputTokens?: number;
+    supportsTools?: boolean; supportsVision?: boolean; thinkingMode?: boolean; reasoningEffort?: string;
+  }
 ): Promise<AIModel> {
   return (await request<{ model: AIModel }>(`/ai-config/models/${id}`, {
     method: 'PUT', ...jsonBody(data),

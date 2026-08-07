@@ -300,6 +300,10 @@ async function createSchema(): Promise<void> {
       temperature REAL DEFAULT 0.7,
       max_input_tokens INTEGER DEFAULT 128000,
       max_output_tokens INTEGER DEFAULT 4096,
+      supports_tools INTEGER DEFAULT 1,
+      supports_vision INTEGER DEFAULT 0,
+      thinking_mode INTEGER DEFAULT 0,
+      reasoning_effort TEXT DEFAULT '',
       enabled INTEGER DEFAULT 1,
       is_default INTEGER DEFAULT 0,
       created_at TEXT NOT NULL,
@@ -530,6 +534,26 @@ async function createSchema(): Promise<void> {
      )`,
     [new Date().toISOString()]
   );
+
+  // 迁移：为 user_ai_models 添加模型能力字段（工具调用/图片输入/思考模式/思考强度）
+  for (const colDef of [
+    'supports_tools INTEGER DEFAULT 1',
+    'supports_vision INTEGER DEFAULT 0',
+    'thinking_mode INTEGER DEFAULT 0',
+    "reasoning_effort TEXT DEFAULT ''",
+  ]) {
+    const colName = colDef.split(' ')[0];
+    if (!(await columnExists('user_ai_models', colName))) {
+      try {
+        await runAsync(`ALTER TABLE user_ai_models ADD COLUMN ${colDef}`);
+        logger.info(`数据库迁移: 已添加 user_ai_models.${colName} 列`);
+      } catch (error: any) {
+        if (!error.message?.includes('duplicate column name')) {
+          logger.warn(`user_ai_models.${colName} 列添加跳过: ${error.message}`);
+        }
+      }
+    }
+  }
 }
 
 /**

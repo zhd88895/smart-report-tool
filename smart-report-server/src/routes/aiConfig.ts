@@ -280,12 +280,16 @@ export class AIConfigRoutes {
     try {
       const userId = req.user!.userId;
       const id = req.params.id as string;
-      const { displayName, temperature, maxInputTokens, maxOutputTokens } = req.body ?? {};
+      const { displayName, temperature, maxInputTokens, maxOutputTokens, supportsTools, supportsVision, thinkingMode, reasoningEffort } = req.body ?? {};
       const model = await userAIConfigService.updateModel(userId, id, {
         displayName,
         temperature,
         maxInputTokens,
         maxOutputTokens,
+        supportsTools,
+        supportsVision,
+        thinkingMode,
+        reasoningEffort,
       });
       if (!model) {
         sendNotFound(res);
