@@ -113,6 +113,23 @@ function extractLimitFromError(errorText: string): number | null {
 }
 
 /**
+ * 发送一次探测请求；网络类错误（超时/连接失败）自动重试一次。
+ * 大请求在网关/代理层偶发连接重置，直接判死刑会浪费已探测成果。
+ */
+async function sendProbeWithRetry(
+  cfg: ResolvedConfig,
+  inputText: string,
+  maxOutput: number
+): Promise<ProbeAttempt> {
+  const first = await sendProbe(cfg, inputText, maxOutput);
+  if (first.kind !== 'fatal') return first;
+  // 认证/限流错误不重试，直接上报
+  if (/API Key|频率过高/.test(first.errorText)) return first;
+  await new Promise((r) => setTimeout(r, 2000));
+  return sendProbe(cfg, inputText, maxOutput);
+}
+
+/**
  * 发送一次探测请求。
  * @param inputText 输入内容（输入探测用大填充文本，输出探测用 'Hi'）
  * @param maxOutput 输出参数值
@@ -176,7 +193,7 @@ async function probeInputLimit(
   // 第 1 步：校准字符/token 比例（用厂商返回的 usage.prompt_tokens 实测，避免估算误差）
   addStep(job, '第 1 步：校准字符/token 比例…');
   const calText = FILLER_UNIT.repeat(Math.ceil(20000 / FILLER_UNIT.length));
-  const cal = await sendProbe(cfg, calText, 16);
+  const cal = await sendProbeWithRetry(cfg, calText, 16);
   if (cal.kind === 'fatal') throw new Error(`校准请求失败：${cal.errorText}`);
   if (cal.kind !== 'ok') throw new Error(`校准请求被拒绝：${cal.errorText.slice(0, 150)}`);
   // 减去少量系统开销（消息包装约 10 token）
@@ -197,7 +214,7 @@ async function probeInputLimit(
 
   while (candidate <= INPUT_PROBE_CAP) {
     addStep(job, `尝试输入 ≈ ${candidate.toLocaleString()} token…`);
-    const attempt = await sendProbe(cfg, buildText(candidate), 16);
+    const attempt = await sendProbeWithRetry(cfg, buildText(candidate), 16);
     if (attempt.kind === 'ok') {
       lo = candidate;
       addStep(job, `✓ ${candidate.toLocaleString()} token 可用`);
@@ -205,7 +222,15 @@ async function probeInputLimit(
       candidate = Math.min(candidate * 2, INPUT_PROBE_CAP);
       continue;
     }
-    if (attempt.kind === 'fatal') throw new Error(attempt.errorText);
+    if (attempt.kind === 'fatal') {
+      // 网络类错误重试后仍失败：已有验证成果就带着成果结束，不要整任务作废
+      if (lo > 0) {
+        notes.push(`探测中途网络错误（${attempt.errorText.slice(0, 60)}），结果为已验证的最大值`);
+        addStep(job, `⚠ 网络错误，提前结束，保留已验证结果 ${lo.toLocaleString()}`);
+        return lo;
+      }
+      throw new Error(attempt.errorText);
+    }
     // 上下文超限：先尝试从错误信息解析厂商给出的真实上限
     const realLimit = extractLimitFromError(attempt.errorText);
     addStep(job, `✗ ${candidate.toLocaleString()} token 超限：${attempt.errorText.slice(0, 120)}`);
@@ -214,7 +239,7 @@ async function probeInputLimit(
       // 用真实上限验证一次（若刚好等于已验证值则跳过）
       if (realLimit > lo) {
         addStep(job, `验证厂商给出的上限 ${realLimit.toLocaleString()}…`);
-        const verify = await sendProbe(cfg, buildText(realLimit), 16);
+        const verify = await sendProbeWithRetry(cfg, buildText(realLimit), 16);
         if (verify.kind === 'ok') {
           addStep(job, `✓ ${realLimit.toLocaleString()} token 验证通过`);
           return realLimit;
@@ -240,12 +265,15 @@ async function probeInputLimit(
   addStep(job, `第 3 步：在 ${lo.toLocaleString()} ~ ${hi.toLocaleString()} 之间二分逼近…`);
   while (hi - lo > INPUT_PROBE_TOLERANCE) {
     const mid = Math.floor((lo + hi) / 2);
-    const attempt = await sendProbe(cfg, buildText(mid), 16);
+    const attempt = await sendProbeWithRetry(cfg, buildText(mid), 16);
     if (attempt.kind === 'ok') {
       lo = mid;
       addStep(job, `✓ ${mid.toLocaleString()} token 可用`);
     } else if (attempt.kind === 'fatal') {
-      throw new Error(attempt.errorText);
+      // 网络错误：保留已验证下界，提前收敛
+      notes.push(`二分阶段网络错误（${attempt.errorText.slice(0, 60)}），结果为已验证的最大值`);
+      addStep(job, `⚠ 网络错误，提前收敛到 ${lo.toLocaleString()}`);
+      break;
     } else {
       hi = mid;
       addStep(job, `✗ ${mid.toLocaleString()} token 超限`);
@@ -266,7 +294,7 @@ async function probeOutputLimit(
   addStep(job, '输出探测：检查厂商是否校验输出参数…');
 
   // 先用天花板试：接受说明厂商不校验（或上限确实这么高）
-  const first = await sendProbe(cfg, 'Hi', OUTPUT_TOKEN_CEILING);
+  const first = await sendProbeWithRetry(cfg, 'Hi', OUTPUT_TOKEN_CEILING);
   if (first.kind === 'ok') {
     notes.push(`厂商未校验输出参数，接受至 ${OUTPUT_TOKEN_CEILING.toLocaleString()}；真实生成上限请以官方文档为准`);
     return { value: null, isParamLimit: false };
@@ -280,7 +308,7 @@ async function probeOutputLimit(
   const realLimit = extractLimitFromError(first.errorText);
   if (realLimit) {
     addStep(job, `厂商错误信息给出输出上限 ${realLimit.toLocaleString()}，验证中…`);
-    const verify = await sendProbe(cfg, 'Hi', realLimit);
+    const verify = await sendProbeWithRetry(cfg, 'Hi', realLimit);
     if (verify.kind === 'ok') {
       addStep(job, `✓ 输出上限 ${realLimit.toLocaleString()} 验证通过`);
       return { value: realLimit, isParamLimit: true };
@@ -292,9 +320,13 @@ async function probeOutputLimit(
   let lo = 16, hi = OUTPUT_TOKEN_CEILING;
   while (hi - lo > 1024) {
     const mid = Math.floor((lo + hi) / 2);
-    const attempt = await sendProbe(cfg, 'Hi', mid);
+    const attempt = await sendProbeWithRetry(cfg, 'Hi', mid);
     if (attempt.kind === 'ok') lo = mid;
-    else if (attempt.kind === 'fatal') throw new Error(attempt.errorText);
+    else if (attempt.kind === 'fatal') {
+      // 网络错误：保留已验证下界提前收敛
+      notes.push(`输出探测网络错误（${attempt.errorText.slice(0, 60)}），结果为已验证的最大值`);
+      break;
+    }
     else if (attempt.kind === 'context_error') { notes.push('输出探测报错无法归类，中止'); return { value: null, isParamLimit: false }; }
     else hi = mid;
   }
