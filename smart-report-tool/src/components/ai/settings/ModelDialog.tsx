@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { CheckCircle2, XCircle, Zap } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { CheckCircle2, Gauge, XCircle, Zap } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -11,7 +11,8 @@ import { LoadingSpinner } from '@/components/common/LoadingSpinner';
 import { toast } from 'sonner';
 import {
   createModel, updateModel, setDefaultModel, testConnection,
-  type AIModel, type ConnectionTestResult,
+  startProbeLimits, fetchProbeJob,
+  type AIModel, type ConnectionTestResult, type LimitProbeJob,
 } from '@/services/aiConfigService';
 
 interface ModelForm {
@@ -45,6 +46,10 @@ export function ModelDialog({ open, onOpenChange, providerId, editingModel, onSa
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<ConnectionTestResult | null>(null);
+  // 上限探测：confirmArmed 表示已展示消耗警告、等待二次点击确认
+  const [probeJob, setProbeJob] = useState<LimitProbeJob | null>(null);
+  const [probeConfirmArmed, setProbeConfirmArmed] = useState(false);
+  const probeLogRef = useRef<HTMLDivElement | null>(null);
 
   // 弹窗打开时初始化表单：新增用空表单，编辑回填现有模型
   useEffect(() => {
@@ -62,7 +67,54 @@ export function ModelDialog({ open, onOpenChange, providerId, editingModel, onSa
       setForm(EMPTY_MODEL_FORM);
     }
     setTestResult(null);
+    setProbeJob(null);
+    setProbeConfirmArmed(false);
   }, [open, editingModel]);
+
+  // 探测任务运行中时每 2s 轮询一次进度
+  useEffect(() => {
+    if (!probeJob || probeJob.status !== 'running') return;
+    const timer = setInterval(async () => {
+      try {
+        const fresh = await fetchProbeJob(probeJob.id);
+        setProbeJob(fresh);
+      } catch {
+        // 轮询失败（如服务重启丢失任务）时停止轮询
+        clearInterval(timer);
+      }
+    }, 2000);
+    return () => clearInterval(timer);
+  }, [probeJob?.id, probeJob?.status]);
+
+  // 探测日志自动滚到底部
+  useEffect(() => {
+    probeLogRef.current?.scrollTo({ top: probeLogRef.current.scrollHeight });
+  }, [probeJob?.steps.length]);
+
+  /** 启动上限探测（首次点击仅展示消耗警告，二次点击确认执行） */
+  const handleProbe = async () => {
+    if (!editingModel) return;
+    if (!probeConfirmArmed) { setProbeConfirmArmed(true); return; }
+    setProbeConfirmArmed(false);
+    try {
+      const job = await startProbeLimits(editingModel.id);
+      setProbeJob(job);
+    } catch (err: any) {
+      toast.error(err.message || '启动探测失败');
+    }
+  };
+
+  /** 把探测结果填入表单（仅填入探测到的字段） */
+  const applyProbeResult = () => {
+    if (!probeJob?.result) return;
+    const r = probeJob.result;
+    setForm((f) => ({
+      ...f,
+      ...(r.maxInputTokens != null ? { maxInputTokens: String(r.maxInputTokens) } : {}),
+      ...(r.maxOutputTokens != null ? { maxOutputTokens: String(r.maxOutputTokens) } : {}),
+    }));
+    toast.success('已填入探测结果，点击保存生效');
+  };
 
   /** 用当前厂商的已保存配置，对表单中的模型 ID 做真实对话测试 */
   const handleTestModel = async () => {
@@ -169,7 +221,62 @@ export function ModelDialog({ open, onOpenChange, providerId, editingModel, onSa
                 </span>
               )
             )}
+            {/* 上限探测：仅编辑已保存模型时可用；首次点击展示消耗警告，二次点击确认 */}
+            {editingModel && (
+              <Button
+                type="button" variant="outline" size="sm"
+                onClick={handleProbe}
+                disabled={probeJob?.status === 'running'}
+                title="通过实际调用逐步试出模型的真实输入/输出上限"
+              >
+                {probeJob?.status === 'running'
+                  ? <LoadingSpinner className="inline-flex py-0 mr-1" />
+                  : <Gauge className="h-3.5 w-3.5 mr-1" />}
+                {probeJob?.status === 'running' ? '探测中…' : '探测上限'}
+              </Button>
+            )}
           </div>
+          {/* 探测消耗警告（二次确认） */}
+          {probeConfirmArmed && (
+            <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
+              探测会真实调用厂商 API 并逐步加大输入，预计消耗数十万至数百万 token 额度，耗时可能达数分钟。
+              再次点击「探测上限」确认开始。
+            </div>
+          )}
+          {/* 探测进度日志 + 结果 */}
+          {probeJob && (
+            <div className="space-y-2 rounded-md border p-3">
+              <div
+                ref={probeLogRef}
+                className="max-h-32 overflow-y-auto font-mono text-xs text-muted-foreground space-y-0.5"
+              >
+                {probeJob.steps.map((s, i) => <div key={i}>{s.message}</div>)}
+                {probeJob.status === 'running' && <div className="animate-pulse">…</div>}
+              </div>
+              {probeJob.status === 'done' && probeJob.result && (
+                <div className="flex items-center justify-between gap-2 border-t pt-2">
+                  <span className="text-xs">
+                    实测：输入 {probeJob.result.maxInputTokens?.toLocaleString() ?? '未测出'}
+                    {' / '}
+                    输出 {probeJob.result.maxOutputTokens?.toLocaleString() ?? '厂商未校验'}
+                  </span>
+                  {(probeJob.result.maxInputTokens != null || probeJob.result.maxOutputTokens != null) && (
+                    <Button type="button" variant="link" size="sm" className="h-auto p-0 text-xs" onClick={applyProbeResult}>
+                      填入结果
+                    </Button>
+                  )}
+                </div>
+              )}
+              {probeJob.status === 'done' && probeJob.result?.notes.length ? (
+                <div className="text-xs text-muted-foreground space-y-0.5">
+                  {probeJob.result.notes.map((n, i) => <div key={i}>· {n}</div>)}
+                </div>
+              ) : null}
+              {probeJob.status === 'error' && (
+                <div className="border-t pt-2 text-xs text-destructive">探测中止：{probeJob.error}</div>
+              )}
+            </div>
+          )}
           <div className="space-y-2">
             <Label>显示名</Label>
             <Input

@@ -144,7 +144,7 @@ export interface UserAIResponse {
 }
 
 /** 解析后的调用配置（数据库配置或 .env 兜底） */
-interface ResolvedConfig {
+export interface ResolvedConfig {
   apiKey: string;
   baseUrl: string;
   model: string;
@@ -167,7 +167,7 @@ interface ResolvedConfig {
  * 优先取用户数据库配置（指定 modelId 或默认模型）；
  * 用户无启用模型时回退到 .env 的 MiMo 配置（要求 MIMO_API_KEY 存在且非占位符）。
  */
-async function resolveConfig(userId: string, modelId?: string): Promise<ResolvedConfig> {
+export async function resolveConfig(userId: string, modelId?: string): Promise<ResolvedConfig> {
   const row = modelId
     ? await userAIConfigRepository.getModelWithProvider(userId, modelId)
     : await userAIConfigRepository.getDefaultModel(userId);

@@ -238,6 +238,38 @@ export async function fetchUsage(): Promise<UsageStats> {
   return request<UsageStats>('/ai-config/usage');
 }
 
+// ── 上限探测 ──
+
+/** 上限探测任务（镜像后端 modelLimitProbeService.ProbeJob） */
+export interface LimitProbeJob {
+  id: string;
+  modelId: string;
+  modelName: string;
+  status: 'running' | 'done' | 'error';
+  steps: { time: string; message: string }[];
+  result: {
+    maxInputTokens: number | null;
+    maxOutputTokens: number | null;
+    outputIsParamLimit: boolean;
+    notes: string[];
+  } | null;
+  error: string | null;
+  startedAt: string;
+  finishedAt: string | null;
+}
+
+/** 启动模型上限探测（真实调用厂商 API，会消耗额度），返回任务 */
+export async function startProbeLimits(modelId: string): Promise<LimitProbeJob> {
+  return request<LimitProbeJob>(`/ai-config/models/${modelId}/probe-limits`, { method: 'POST' })
+    .then((r: any) => r.job ?? r);
+}
+
+/** 轮询探测任务进度 */
+export async function fetchProbeJob(jobId: string): Promise<LimitProbeJob> {
+  return request<LimitProbeJob>(`/ai-config/probe-jobs/${jobId}`)
+    .then((r: any) => r.job ?? r);
+}
+
 // ── 调用记录 ──
 
 /** 调用记录列表行（不含请求体大字段） */

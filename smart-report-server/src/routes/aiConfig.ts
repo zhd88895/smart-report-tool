@@ -18,6 +18,7 @@ import { authenticate } from '../middleware/auth';
 import { ApiResponse, safeErrorMessage } from '../types';
 import { userAIConfigService } from '../services/userAIConfigService';
 import { userAIConfigRepository } from '../db/repositories/userAIConfigRepository';
+import { startLimitProbe, getLimitProbeJob } from '../services/modelLimitProbeService';
 
 /** 统一 404 响应：资源不存在（含越权访问他人资源） */
 function sendNotFound(res: Response): void {
@@ -85,6 +86,10 @@ export class AIConfigRoutes {
     this.router.put('/models/:id/set-default', authenticate, this.setDefaultModel.bind(this));
     // 测试模型可用性（发送最小对话请求，返回耗时与回复摘要）
     this.router.post('/models/:id/test', authenticate, this.testModel.bind(this));
+    // 启动模型上限探测（异步任务，真实消耗 API 额度）
+    this.router.post('/models/:id/probe-limits', authenticate, this.startProbeLimits.bind(this));
+    // 查询上限探测任务进度
+    this.router.get('/probe-jobs/:jobId', authenticate, this.getProbeJob.bind(this));
 
     // ── 辅助 ──
     // 测试连接（providerId 或内联厂商配置，不持久化）
@@ -403,6 +408,47 @@ export class AIConfigRoutes {
       res.status(200).json(response);
     } catch (error) {
       sendError(res, 400, '模型测试失败', error);
+    }
+  }
+
+  /** POST /models/:id/probe-limits — 启动上限探测任务（真实调用厂商 API，消耗额度） */
+  private async startProbeLimits(req: Request, res: Response): Promise<void> {
+    try {
+      const userId = req.user!.userId;
+      const model = await userAIConfigRepository.getModel(userId, req.params.id as string);
+      if (!model) {
+        sendNotFound(res);
+        return;
+      }
+      const job = startLimitProbe(userId, model.id, model.display_name || model.model_id);
+      const response: ApiResponse<{ job: typeof job }> = {
+        code: 202,
+        data: { job },
+        message: '上限探测已启动',
+      };
+      res.status(202).json(response);
+    } catch (error) {
+      sendError(res, 400, '启动上限探测失败', error);
+    }
+  }
+
+  /** GET /probe-jobs/:jobId — 查询上限探测任务进度与结果 */
+  private async getProbeJob(req: Request, res: Response): Promise<void> {
+    try {
+      const userId = req.user!.userId;
+      const job = getLimitProbeJob(userId, req.params.jobId as string);
+      if (!job) {
+        sendNotFound(res);
+        return;
+      }
+      const response: ApiResponse<{ job: typeof job }> = {
+        code: 200,
+        data: { job },
+        message: '获取探测任务成功',
+      };
+      res.status(200).json(response);
+    } catch (error) {
+      sendError(res, 400, '获取探测任务失败', error);
     }
   }
 
