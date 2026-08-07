@@ -117,6 +117,11 @@ class AnalysisTaskService {
     return this.runningTaskId === taskId;
   }
 
+  /** 重试准备：清掉任务的内存运行时（含旧结果与残留订阅），避免重连时补发旧内容 */
+  resetRuntime(taskId: string): void {
+    this.runtime.delete(taskId);
+  }
+
   /** 执行单个任务：读文件 → 三条分析路径 → 累积输出 → 自动保存报告 → 调度下一个 */
   private async runTask(task: AnalysisTaskRecord): Promise<void> {
     this.runningTaskId = task.id;

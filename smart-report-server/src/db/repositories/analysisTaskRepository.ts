@@ -158,6 +158,30 @@ export const analysisTaskRepository = {
     return (result?.changes ?? 0) > 0;
   },
 
+  /**
+   * 重试：重置原任务记录为 queued（清空结果/错误/报告关联/时间戳），
+   * 可选更换模型；仅终态任务可重置，返回更新后的记录。
+   */
+  async resetForRetry(
+    id: string,
+    userId: string,
+    model?: { modelId?: string | null; modelName?: string }
+  ): Promise<AnalysisTaskRecord | null> {
+    const sets = `status = 'queued', result_text = NULL, error = NULL, report_id = NULL, started_at = NULL, finished_at = NULL`;
+    const params: any[] = [];
+    let modelSet = '';
+    if (model && model.modelId !== undefined) {
+      modelSet = ', model_id = ?, model_name = ?';
+      params.push(model.modelId, (model.modelName ?? '').slice(0, 200));
+    }
+    const result = await runAsync(
+      `UPDATE analysis_tasks SET ${sets}${modelSet} WHERE id = ? AND user_id = ? AND status IN ('done','error','cancelled')`,
+      [...params, id, userId]
+    );
+    if ((result?.changes ?? 0) === 0) return null;
+    return this.findById(id);
+  },
+
   /** 删除终态任务记录（done/error/cancelled；运行/排队中不允许删） */
   async removeFinished(id: string, userId: string): Promise<boolean> {
     const result = await runAsync(

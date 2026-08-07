@@ -724,7 +724,7 @@ export class AIRoutes {
     }
   }
 
-  /** 重试任务：复制原任务参数新建任务（可选换模型），文件引用去重存储 */
+  /** 重试任务：重置原任务记录重新排队（可选换模型），文件引用去重存储，不产生新任务标签 */
   private async retryAnalysisTask(req: Request, res: Response): Promise<void> {
     try {
       const source = await analysisTaskRepository.findByIdAndUser(req.params.id as string, req.user!.userId);
@@ -745,20 +745,18 @@ export class AIRoutes {
       await fileDedupService.touch(source.fileHash);
 
       const { modelId, modelName } = req.body as { modelId?: string; modelName?: string };
-      const task = await analysisTaskRepository.create({
-        userId: source.userId,
-        fileName: source.fileName,
-        fileHash: source.fileHash,
-        category: source.category,
-        customPrompt: source.customPrompt,
-        supplements: source.supplements,
-        knowledgeFileIds: source.knowledgeFileIds,
-        // 指定了新模型就用新的；未指定则沿用原任务的模型
-        modelId: modelId !== undefined ? modelId : source.modelId,
-        modelName: modelName !== undefined ? String(modelName).slice(0, 200) : source.modelName,
-        author: source.author,
-        userHint: source.userHint,
-      });
+      // 重置原任务（指定了新模型就换，未指定沿用原模型）
+      const task = await analysisTaskRepository.resetForRetry(
+        source.id,
+        req.user!.userId,
+        modelId !== undefined ? { modelId, modelName } : undefined
+      );
+      if (!task) {
+        res.status(409).json({ code: 409, data: null, message: '任务尚未结束，不能重试' } satisfies ApiResponse<null>);
+        return;
+      }
+      // 清掉旧运行时（旧结果/残留订阅），再重新排队
+      analysisTaskService.resetRuntime(task.id);
       await analysisTaskService.enqueue(task.id);
       res.status(200).json({ code: 200, data: { task }, message: 'success' } satisfies ApiResponse<any>);
     } catch (error: any) {

@@ -363,10 +363,11 @@ export const useAnalysisTaskStore = create<AnalysisTaskState>((set, get) => {
         if (!res.ok) throw new Error(data.message || data.error || '重试失败');
         const rec = data?.data?.task;
         if (!rec) throw new Error('重试失败');
+        // 重试复用原任务记录：原地更新（不新增任务标签），清空旧结果回到排队状态
         const task = mapRecord(rec);
-        const hasBusy = get().tasks.some((t) => t.status === 'running' || t.status === 'queued');
+        const hasBusy = get().tasks.some((t) => t.id !== task.id && (t.status === 'running' || t.status === 'queued'));
         set((s) => ({
-          tasks: [...s.tasks.filter((t) => t.id !== task.id), task],
+          tasks: s.tasks.map((t) => (t.id === task.id ? task : t)),
           activeTaskId: hasBusy ? s.activeTaskId : task.id,
         }));
         toast.success(`「${task.fileName}」已重新加入分析队列${model?.modelName ? `（使用 ${model.modelName}）` : ''}`);
