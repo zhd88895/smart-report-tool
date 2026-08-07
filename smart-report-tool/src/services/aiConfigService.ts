@@ -50,6 +50,7 @@ export const VENDOR_PRESETS: VendorPreset[] = [
   { key: 'minimax', name: 'MiniMax',    defaultBaseUrl: 'https://api.minimax.chat/v1' },
   { key: 'lingyi',  name: '零一万物',    defaultBaseUrl: 'https://api.lingyiwanwu.com/v1' },
   { key: 'openai',  name: 'OpenAI',     defaultBaseUrl: 'https://api.openai.com/v1' },
+  { key: 'opencode-go', name: 'OpenCode Go', defaultBaseUrl: 'https://opencode.ai/zen/go/v1' },
   { key: 'custom',  name: '自定义',      defaultBaseUrl: '' },
 ];
 

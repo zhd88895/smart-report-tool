@@ -26,7 +26,7 @@ const log = getLogger('AIProviderService', 'core');
 // ═══════════════════════════════════════════════════════
 
 /** 支持的厂商标识 */
-export type VendorKey = 'mimo' | 'deepseek' | 'kimi' | 'qwen' | 'glm' | 'minimax' | 'lingyi' | 'openai' | 'custom';
+export type VendorKey = 'mimo' | 'deepseek' | 'kimi' | 'qwen' | 'glm' | 'minimax' | 'lingyi' | 'openai' | 'opencode-go' | 'custom';
 
 /** 厂商差异配置（认证方式、token 参数名、默认模型等） */
 export interface VendorQuirks {
@@ -54,6 +54,8 @@ export const VENDOR_QUIRKS: Record<VendorKey, VendorQuirks> = {
   minimax: { key: 'minimax', name: 'MiniMax',    defaultBaseUrl: 'https://api.minimax.chat/v1',                     authHeader: 'Authorization', authPrefix: 'Bearer ', tokenParam: 'max_tokens',            supportsStreamUsage: false, defaultModels: ['abab6.5s-chat'] },
   lingyi:  { key: 'lingyi',  name: '零一万物',    defaultBaseUrl: 'https://api.lingyiwanwu.com/v1',                  authHeader: 'Authorization', authPrefix: 'Bearer ', tokenParam: 'max_tokens',           supportsStreamUsage: true,  defaultModels: ['yi-large'] },
   openai:  { key: 'openai',  name: 'OpenAI',     defaultBaseUrl: 'https://api.openai.com/v1',                       authHeader: 'Authorization', authPrefix: 'Bearer ', tokenParam: 'max_tokens',            supportsStreamUsage: true,  defaultModels: ['gpt-4o', 'gpt-4o-mini'] },
+  // OpenCode Go：OpenAI 兼容协议的模型可直接接入；Anthropic /messages（MiniMax、Qwen3.x）与 /responses（GPT 5.6 Luna）协议的模型暂不支持
+  'opencode-go': { key: 'opencode-go', name: 'OpenCode Go', defaultBaseUrl: 'https://opencode.ai/zen/go/v1',        authHeader: 'Authorization', authPrefix: 'Bearer ', tokenParam: 'max_tokens',            supportsStreamUsage: true,  defaultModels: ['deepseek-v4-flash', 'deepseek-v4-pro', 'mimo-v2.5', 'mimo-v2.5-pro', 'kimi-k3', 'kimi-k2.7-code', 'kimi-k2.6', 'glm-5.2', 'glm-5.1', 'grok-4.5', 'hy3'] },
   custom:  { key: 'custom',  name: '自定义',      defaultBaseUrl: '',                                                authHeader: 'Authorization', authPrefix: 'Bearer ', tokenParam: 'max_tokens',            supportsStreamUsage: false, defaultModels: [] },
 };
 
