@@ -356,24 +356,27 @@ def generate_docx():
 # Part 2: 生成 HTML 网页
 # ============================================================
 def generate_html():
-    import markdown
-
     md_text = MD_FILE.read_text(encoding='utf-8')
 
-    # 使用 markdown 扩展
-    html_body = markdown.markdown(
-        md_text,
-        extensions=[
-            'tables',
-            'fenced_code',
-            'codehilite',
-            'toc',
-            'nl2br',
-        ],
-        extension_configs={
-            'codehilite': {'css_class': 'highlight', 'guess_lang': False},
+    # 优先 python-markdown（扩展丰富）；缺失时回退 markdown-it-py（托管运行时自带）
+    try:
+        import markdown
+        html_body = markdown.markdown(
+            md_text,
+            extensions=[
+                'tables',
+                'fenced_code',
+                'codehilite',
+                'toc',
+                'nl2br',
+            ],
+            extension_configs={
+                'codehilite': {'css_class': 'highlight', 'guess_lang': False},
         }
     )
+    except ImportError:
+        from markdown_it import MarkdownIt
+        html_body = MarkdownIt('commonmark', {'breaks': True, 'html': True}).enable('table').render(md_text)
 
     html_template = f'''<!DOCTYPE html>
 <html lang="zh-CN">

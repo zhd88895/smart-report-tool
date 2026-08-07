@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""生成 v0.4.0 系统架构图 docs/architecture.png（深蓝商务风，与产品 UI 一致）"""
+"""生成 v0.5.0 系统架构图 docs/architecture.png（深蓝商务风，与产品 UI 一致）"""
 import sys
 from pathlib import Path
 
@@ -56,7 +56,7 @@ def arrow(x1, y1, x2, y2, color=C_GRAY, lw=1.6, style="<|-|>", label=None, label
 
 # ── 标题 ──
 text(50, 96.5, "智能报告生成工具 · 系统架构", size=17, weight="bold", color=C_SIDEBAR)
-text(50, 92.8, "v0.4.0 ｜ AI 驱动的巡检日志分析与报告生成平台（本地部署）", size=10.5, color=C_GRAY)
+text(50, 92.8, "v0.5.0 ｜ AI 驱动的巡检日志分析与报告生成平台（本地部署）", size=10.5, color=C_GRAY)
 
 # ── 第 1 层：展现层 ──
 box(6, 76, 88, 12, C_SIDEBAR, C_SIDEBAR)

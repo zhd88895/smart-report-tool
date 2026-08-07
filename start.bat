@@ -1,10 +1,10 @@
 @echo off
 setlocal EnableDelayedExpansion
-title Smart Report Tool v0.4.0
+title Smart Report Tool v0.5.0
 
 echo.
 echo ====================================================
-echo        Smart Report Tool v0.4.0
+echo        Smart Report Tool v0.5.0
 echo ====================================================
 echo   Backend:  http://localhost:3001
 echo   Frontend: http://localhost:5173

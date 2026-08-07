@@ -1,6 +1,6 @@
 # ============================================================
 #  Smart Report Tool - One-Click Start Script (PowerShell)
-#  Version: v0.4.0
+#  Version: v0.5.0
 #  Description: Start both frontend and backend services
 # ============================================================
 
@@ -8,7 +8,7 @@ $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $MyInvocation.MyCommand.Definition
 
 # ---- Version Info ----
-$VERSION = "0.4.0"
+$VERSION = "0.5.0"
 
 function Write-Banner {
     Write-Host ""

@@ -1,12 +1,12 @@
 #!/bin/bash
 # ============================================================
 #  Smart Report Tool - One-Click Start Script (Linux/Mac)
-#  Version: v0.4.0
+#  Version: v0.5.0
 # ============================================================
 
 set -e
 
-VERSION="0.4.0"
+VERSION="0.5.0"
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 # Color definitions
