@@ -508,16 +508,17 @@ export function AIAnalysisPanel() {
         </CardContent>
       </Card>
 
-      {/* 结果卡片：查看中的任务（运行中/完成/失败） */}
-      {activeTask && (activeTask.status === 'running' || activeTask.streamingText || activeTask.result || activeTask.error) && (
+      {/* 结果卡片：查看中的任务（排队/运行中/完成/失败） */}
+      {activeTask && (activeTask.status === 'queued' || activeTask.status === 'running' || activeTask.streamingText || activeTask.result || activeTask.error) && (
         <Card>
           <CardHeader className="pb-2">
             <div className="flex items-center justify-between gap-2 flex-wrap">
               <CardTitle className="text-base flex items-center gap-2">
                 {activeTask.error ? <AlertTriangle className="h-4 w-4 text-destructive" />
+                  : activeTask.status === 'queued' ? <Clock className="h-4 w-4 text-amber-500" />
                   : taskRunning ? <Loader2 className="h-4 w-4 animate-spin text-primary" />
                   : <CheckCircle className="h-4 w-4 text-green-500" />}
-                {taskRunning ? '分析中...' : activeTask.error ? '分析出错' : '分析结果'}
+                {activeTask.status === 'queued' ? '排队等待中' : taskRunning ? '分析中...' : activeTask.error ? '分析出错' : '分析结果'}
                 <span className="text-xs font-normal text-muted-foreground truncate max-w-72" title={activeTask.fileName}>
                   {activeTask.fileName}
                 </span>
@@ -544,7 +545,12 @@ export function AIAnalysisPanel() {
                 {activeTask.packProgress}
               </div>
             )}
-            {activeTask.error ? (
+            {activeTask.status === 'queued' ? (
+              <div className="flex items-center gap-2 rounded-md bg-amber-500/5 border border-amber-500/20 px-3 py-3 text-sm text-amber-600">
+                <Clock className="h-4 w-4 shrink-0" />
+                {activeTask.packProgress || '排队等待中，前面的任务完成后自动开始，无需停留在本页。'}
+              </div>
+            ) : activeTask.error ? (
               <div className="space-y-2">
                 <p className="text-sm text-destructive">{activeTask.error}</p>
                 {activeTask.error.includes('401') || activeTask.error.includes('无效') || activeTask.error.includes('过期') ? (

@@ -163,6 +163,12 @@ export const useAnalysisTaskStore = create<AnalysisTaskState>((set, get) => {
             useAIConfigStore.getState().setFallbackNotice(true);
             return false;
           }
+          if (parsed.type === 'task_started') {
+            // 任务开始执行：从「排队」切换为「分析中」，清空占位进度
+            const cur = get().tasks.find((x) => x.id === id);
+            if (cur && cur.status === 'queued') update(id, { status: 'running', packProgress: '' });
+            return false;
+          }
           if (parsed.type === 'task_done') {
             update(id, { status: 'done', result: fullText, streamingText: '', packProgress: '', reportId: parsed.reportId ?? null });
             const task = get().tasks.find((x) => x.id === id);
@@ -304,12 +310,17 @@ export const useAnalysisTaskStore = create<AnalysisTaskState>((set, get) => {
         if (!rec) throw new Error('任务创建失败');
 
         const task = mapRecord(rec);
-        set((s) => ({ tasks: [...s.tasks.filter((t) => t.id !== task.id), task], activeTaskId: task.id }));
+        // 入队时若已有任务在跑/排队，保持当前查看的任务（新任务在队列条中可见）；
+        // 本地状态可能滞后于后端（已 running 但首包未到仍显示 queued），queued 也算占用
+        const hasBusy = get().tasks.some((t) => t.status === 'running' || t.status === 'queued');
+        set((s) => ({
+          tasks: [...s.tasks.filter((t) => t.id !== task.id), task],
+          activeTaskId: hasBusy ? s.activeTaskId : task.id,
+        }));
 
-        const hasRunning = get().tasks.some((t) => t.status === 'running' && t.id !== task.id);
-        if (hasRunning || task.status === 'queued') {
+        if (hasBusy || task.status === 'queued') {
           const pos = get().tasks.filter((t) => t.status === 'queued').length;
-          if (hasRunning) toast.info(`已有分析任务进行中，「${task.fileName}」已加入队列（第 ${pos} 位）`);
+          if (hasBusy) toast.info(`已有分析任务进行中，「${task.fileName}」已加入队列（第 ${pos} 位）`);
         }
         // 建立事件流：排队中的任务会在开始执行后自动推送进度与增量
         void connectStream(task.id);

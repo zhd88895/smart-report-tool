@@ -701,6 +701,10 @@ export class AIRoutes {
       if (task.status === 'queued') {
         writeEvent({ type: 'pack_progress', message: '排队等待中，前面的任务完成后自动开始...' });
       }
+      if (task.status === 'running') {
+        // 已处于执行中：先告知订阅者切换状态，再补发累积输出
+        writeEvent({ type: 'task_started' });
+      }
       const { runtime, unsubscribe } = analysisTaskService.subscribe(taskId, writeEvent);
       // 补发已累积的输出与当前进度（运行中重连）
       if (runtime && runtime.text) writeEvent({ choices: [{ delta: { content: runtime.text } }] });

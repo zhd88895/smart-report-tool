@@ -30,6 +30,7 @@ const log = getLogger('AnalysisTaskService', 'core');
 export type TaskEvent =
   | { type: 'pack_progress'; message: string }
   | { type: 'fallback_notice' }
+  | { type: 'task_started' }
   | { choices: Array<{ delta: { content: string } }> }
   | { type: 'task_done'; reportId: string | null }
   | { type: 'task_error'; message: string };
@@ -140,6 +141,8 @@ class AnalysisTaskService {
 
     try {
       log.info(`分析任务开始: ${task.id} (${task.fileName})`);
+      // 显式通知订阅者任务已开始（前端据此把卡片从「排队」切换为「分析中」）
+      emit({ type: 'task_started' });
 
       // 从去重存储读取文件实体
       const entry = await fileDedupService.lookup(task.fileHash);
