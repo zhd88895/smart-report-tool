@@ -11,7 +11,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Upload, FileText, Bot, Download, Trash2, AlertTriangle, CheckCircle, Zap, Settings, ChevronDown, ChevronUp, FileSpreadsheet, Archive, ListTodo, X, Loader2, Clock } from 'lucide-react';
+import { Upload, FileText, Bot, Download, Trash2, AlertTriangle, CheckCircle, Zap, Settings, ChevronDown, ChevronUp, FileSpreadsheet, Archive, ListTodo, X, Loader2, Clock, RotateCcw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -25,6 +25,7 @@ import { useAIConfigStore } from '@/stores/aiConfigStore';
 import { useAuthStore } from '@/stores/authStore';
 import { useAnalysisTaskStore, buildReportContent, buildReportFileName } from '@/stores/analysisTaskStore';
 import { getApiUrl } from '@/services/api';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { ROUTES } from '@/constants/routes';
 import { DEFAULT_PROMPTS } from '@/constants/analysisPrompts';
 import { toast } from 'sonner';
@@ -44,7 +45,7 @@ export function AIAnalysisPanel() {
   const navigate = useNavigate();
   const { resolved, loadResolved, refreshResolved, currentModel } = useAIConfigStore();
   const { user } = useAuthStore();
-  const { tasks, activeTaskId, enqueue, setActiveTask, removeTask, loadTasks } = useAnalysisTaskStore();
+  const { tasks, activeTaskId, enqueue, setActiveTask, removeTask, loadTasks, retryTask } = useAnalysisTaskStore();
   const [category, setCategory] = useState<string>('host');
   // 输入模式：单文件（默认）⇄ 支持包（压缩包整包分析）
   const [inputMode, setInputMode] = useState<'file' | 'archive'>('file');
@@ -529,6 +530,28 @@ export function AIAnalysisPanel() {
                     <ListTodo className="h-3.5 w-3.5 mr-1.5" />转后台运行
                   </Button>
                 )}
+                {/* 重试：终态任务可用，支持沿用原模型或换其他模型 */}
+                {(activeTask.error || activeTask.result || activeTask.status === 'cancelled') && resolved?.models?.length ? (
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="outline" size="sm" className="h-8">
+                        <RotateCcw className="h-3.5 w-3.5 mr-1.5" />重试
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="max-h-80 overflow-y-auto">
+                      <DropdownMenuItem onClick={() => retryTask(activeTask.id)}>
+                        原模型重试{activeTask.payload.modelName ? `（${activeTask.payload.modelName}）` : ''}
+                      </DropdownMenuItem>
+                      {resolved.models
+                        .filter((m) => m.id !== activeTask.payload.modelId)
+                        .map((m) => (
+                          <DropdownMenuItem key={m.id} onClick={() => retryTask(activeTask.id, { modelId: m.id, modelName: m.displayName })}>
+                            换用 {m.displayName}（{m.providerName}）
+                          </DropdownMenuItem>
+                        ))}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                ) : null}
                 {activeTask.result && (
                   <Button variant="outline" size="sm" className="h-8" onClick={handleExport}>
                     <Download className="h-3.5 w-3.5 mr-1.5" />导出报告

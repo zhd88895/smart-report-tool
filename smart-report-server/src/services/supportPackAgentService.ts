@@ -327,8 +327,32 @@ ${manifest}`;
     }
   }
 
-  // 超过最大轮次：取最后一轮 assistant 的文本，或提示轮次用尽
-  log.warn(`Agentic 分析达到最大轮次 ${MAX_TOOL_ROUNDS}`);
+  // 超过最大轮次：不再直接把中间文本当报告，而是追加一条指令，
+  // 让 AI 基于已收集的信息输出最终完整报告（不再提供工具）
+  log.warn(`Agentic 分析达到最大轮次 ${MAX_TOOL_ROUNDS}，请求生成最终报告`);
+  progress('信息收集完成，正在生成最终报告...');
+  try {
+    messages.push({
+      role: 'user',
+      content: '工具调用次数已达上限。请立即基于以上已经收集到的所有信息，输出完整、结构化的分析报告（不要再请求读取文件）。',
+    });
+    const finalResponse = await callUserAI(userId, {
+      messages,
+      modelId,
+      feature: 'agent',
+      temperature: 0.3,
+      maxOutputTokens: 8192,
+    });
+    fallback = finalResponse.fallback;
+    if (finalResponse.message && finalResponse.message.trim().length > 50) {
+      log.info(`Agentic 最终报告生成完成，长度 ${finalResponse.message.length}`);
+      return { report: finalResponse.message, fallback };
+    }
+  } catch (e: any) {
+    log.warn(`最终报告生成失败，回退到最后一条有效内容: ${e?.message || e}`);
+  }
+
+  // 兜底：取最后一轮 assistant 的文本
   const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant' && m.content);
   const report = lastAssistant?.content || '分析轮次已达上限，请尝试缩小支持包范围或提供更明确的分析方向。';
 

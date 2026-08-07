@@ -193,7 +193,50 @@ function truncateMessages(messages: AIMessage[], maxInputTokens: number): AIMess
     total -= msgChars(result[idx]);
     result.splice(idx, 1);
   }
-  return result;
+  return sanitizeToolChains(result);
+}
+
+/**
+ * 修复截断后被破坏的工具调用链（部分厂商严格校验）：
+ * 1. 删除没有对应 assistant tool_calls 的孤立 tool 消息；
+ * 2. assistant 消息的 tool_calls 若缺少对应 tool 响应，
+ *    将该消息降级为纯文本 assistant（去掉 tool_calls），避免出现
+ *    "Messages with role 'tool' must be a response to a preceding message with 'tool_calls'"。
+ */
+function sanitizeToolChains(messages: AIMessage[]): AIMessage[] {
+  // 每个 tool_call_id 对应的 assistant 消息是否仍在
+  const liveCallIds = new Set<string>();
+  for (const m of messages) {
+    if (m.role === 'assistant' && m.tool_calls) {
+      for (const tc of m.tool_calls) liveCallIds.add(tc.id);
+    }
+  }
+  const cleaned: AIMessage[] = [];
+  for (const m of messages) {
+    if (m.role === 'tool') {
+      // 孤立的 tool 消息（其 assistant tool_calls 已被截断丢弃）→ 转为普通 user 备注保留上下文
+      if (m.tool_call_id && !liveCallIds.has(m.tool_call_id)) {
+        cleaned.push({ role: 'user', content: `[早期工具读取结果，调用链已截断]\n${m.content ?? ''}` });
+        continue;
+      }
+      cleaned.push(m);
+      continue;
+    }
+    if (m.role === 'assistant' && m.tool_calls?.length) {
+      // 该 assistant 的 tool 响应是否完整保留
+      const responseIds = new Set(
+        messages.filter((x) => x.role === 'tool').map((x) => x.tool_call_id)
+      );
+      const allAnswered = m.tool_calls.every((tc) => responseIds.has(tc.id) && liveCallIds.has(tc.id));
+      if (!allAnswered) {
+        // 响应不完整：降级为纯文本，避免请求被厂商拒绝
+        if (m.content) cleaned.push({ role: 'assistant', content: m.content });
+        continue;
+      }
+    }
+    cleaned.push(m);
+  }
+  return cleaned;
 }
 
 /** 构造上游 chat/completions 请求体 */

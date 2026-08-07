@@ -90,6 +90,7 @@ export class AIRoutes {
     this.router.get('/analysis-tasks/:id', authenticate, this.getAnalysisTask.bind(this));
     this.router.get('/analysis-tasks/:id/stream', authenticate, this.streamAnalysisTask.bind(this));
     this.router.post('/analysis-tasks/:id/cancel', authenticate, this.cancelAnalysisTask.bind(this));
+    this.router.post('/analysis-tasks/:id/retry', authenticate, this.retryAnalysisTask.bind(this));
     this.router.delete('/analysis-tasks/:id', authenticate, this.deleteAnalysisTask.bind(this));
   }
 
@@ -720,6 +721,49 @@ export class AIRoutes {
         res.write(`event: error\ndata: ${JSON.stringify({ error: safeErrorMessage(error) })}\n\n`);
         res.end();
       }
+    }
+  }
+
+  /** 重试任务：复制原任务参数新建任务（可选换模型），文件引用去重存储 */
+  private async retryAnalysisTask(req: Request, res: Response): Promise<void> {
+    try {
+      const source = await analysisTaskRepository.findByIdAndUser(req.params.id as string, req.user!.userId);
+      if (!source) {
+        res.status(404).json({ code: 404, data: null, message: '任务不存在' } satisfies ApiResponse<null>);
+        return;
+      }
+      if (source.status !== 'done' && source.status !== 'error' && source.status !== 'cancelled') {
+        res.status(409).json({ code: 409, data: null, message: '任务尚未结束，不能重试' } satisfies ApiResponse<null>);
+        return;
+      }
+      // 文件实体必须还在去重存储中
+      const entry = await fileDedupService.lookup(source.fileHash);
+      if (!entry) {
+        res.status(410).json({ code: 410, data: null, message: '原文件已过期被清理，无法重试，请重新上传' } satisfies ApiResponse<null>);
+        return;
+      }
+      await fileDedupService.touch(source.fileHash);
+
+      const { modelId, modelName } = req.body as { modelId?: string; modelName?: string };
+      const task = await analysisTaskRepository.create({
+        userId: source.userId,
+        fileName: source.fileName,
+        fileHash: source.fileHash,
+        category: source.category,
+        customPrompt: source.customPrompt,
+        supplements: source.supplements,
+        knowledgeFileIds: source.knowledgeFileIds,
+        // 指定了新模型就用新的；未指定则沿用原任务的模型
+        modelId: modelId !== undefined ? modelId : source.modelId,
+        modelName: modelName !== undefined ? String(modelName).slice(0, 200) : source.modelName,
+        author: source.author,
+        userHint: source.userHint,
+      });
+      await analysisTaskService.enqueue(task.id);
+      res.status(200).json({ code: 200, data: { task }, message: 'success' } satisfies ApiResponse<any>);
+    } catch (error: any) {
+      log.error(`重试分析任务失败: ${safeErrorMessage(error)}`);
+      res.status(500).json({ code: 500, data: null, message: safeErrorMessage(error) } satisfies ApiResponse<null>);
     }
   }
 

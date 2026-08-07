@@ -119,6 +119,8 @@ interface AnalysisTaskState {
   setActiveTask: (id: string | null) => void;
   /** 移除任务：排队中的先取消，终态的直接删除记录；运行中的不允许 */
   removeTask: (id: string) => Promise<void>;
+  /** 重试任务（可选换模型）：基于原任务参数新建任务并入队 */
+  retryTask: (id: string, model?: { modelId: string | null; modelName: string } | null) => Promise<void>;
 }
 
 /** 已建立事件流的任务（防重复连接） */
@@ -347,6 +349,31 @@ export const useAnalysisTaskStore = create<AnalysisTaskState>((set, get) => {
         tasks: s.tasks.filter((x) => x.id !== id),
         activeTaskId: s.activeTaskId === id ? null : s.activeTaskId,
       }));
+    },
+
+    retryTask: async (id, model) => {
+      try {
+        const res = await fetch(getApiUrl(`/ai/analysis-tasks/${id}/retry`), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify(model ? { modelId: model.modelId, modelName: model.modelName } : {}),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.message || data.error || '重试失败');
+        const rec = data?.data?.task;
+        if (!rec) throw new Error('重试失败');
+        const task = mapRecord(rec);
+        const hasBusy = get().tasks.some((t) => t.status === 'running' || t.status === 'queued');
+        set((s) => ({
+          tasks: [...s.tasks.filter((t) => t.id !== task.id), task],
+          activeTaskId: hasBusy ? s.activeTaskId : task.id,
+        }));
+        toast.success(`「${task.fileName}」已重新加入分析队列${model?.modelName ? `（使用 ${model.modelName}）` : ''}`);
+        void connectStream(task.id);
+      } catch (err: any) {
+        toast.error(err.message || '重试失败');
+      }
     },
   };
 });
