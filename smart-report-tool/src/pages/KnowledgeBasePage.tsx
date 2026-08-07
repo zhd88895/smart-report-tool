@@ -574,18 +574,19 @@ export default function KnowledgeBasePage() {
           <DialogHeader>
             <DialogTitle>上传知识库文件</DialogTitle>
           </DialogHeader>
-          <div className="space-y-4 py-2">
+          <div className="space-y-4 py-2 min-w-0">
             <div className="space-y-2">
               <Label>选择文件 *（可多选）</Label>
               <Input type="file" multiple onChange={handleFileSelect}
+                className="min-w-0 max-w-full cursor-pointer file:cursor-pointer"
                 accept=".md,.markdown,.html,.htm,.docx,.doc,.pdf,.txt,.text" />
               <p className="text-xs text-muted-foreground">支持 MD、HTML、Word、PDF、TXT，单文件最大200MB</p>
             </div>
             {uploadFiles.length > 0 && (
-              <div className="space-y-1.5 max-h-48 overflow-y-auto rounded-md border p-2">
+              <div className="space-y-1.5 max-h-48 overflow-y-auto overflow-x-hidden rounded-md border p-2">
                 {uploadFiles.map((f, i) => (
                   <div key={`${f.name}_${f.size}_${i}`} className="flex items-center justify-between gap-2 text-sm px-1 py-0.5">
-                    <span className="truncate">{f.name}</span>
+                    <span className="truncate min-w-0 flex-1" title={f.name}>{f.name}</span>
                     <span className="flex items-center gap-1 shrink-0">
                       <span className="text-xs text-muted-foreground">{formatFileSize(f.size)}</span>
                       <Button
@@ -602,7 +603,7 @@ export default function KnowledgeBasePage() {
             <div className="space-y-2">
               <Label>分类</Label>
               <select
-                className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm"
+                className="flex h-9 w-full min-w-0 max-w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm"
                 value={uploadCategory} onChange={(e) => setUploadCategory(e.target.value)}
               >
                 <option value="">未分类</option>
